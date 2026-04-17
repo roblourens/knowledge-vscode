@@ -1,13 +1,13 @@
 ---
 name: finalize
-description: "Roll what was learned in this session back into the VS Code agent host knowledge repo. Use when the user says 'finalize knowledge', 'finalize the session', 'capture what we learned', or has finished implementing a change and wants the docs and changelog updated. Writes doc updates, a new changes/ entry, and cleans up the session's plan/ subfolder. Does NOT commit, push, or merge — leaves the diff for the user to review."
+description: "Roll what was learned in this session back into the VS Code agent host knowledge repo. Use when the user says 'finalize knowledge', 'finalize the session', 'capture what we learned', or has finished implementing a change and wants the docs and changelog updated. Pulls latest from origin/main, writes doc updates, a new changes/ entry, and cleans up the session's plan/ subfolder. Does NOT commit, push, or merge — leaves the diff for the user to review, then 'land' to publish it."
 ---
 
 # Skill: finalize
 
 Capture what was learned in this session as on-disk changes in the knowledge repo, ready for the user to review and commit.
 
-This skill **does not commit, push, merge, or remove worktrees**. The only on-disk deletion it performs is removing the session's `plan/` subfolder. Everything else is the user's call after reviewing the diff.
+This skill **does not commit, push, merge, or remove worktrees**. The only on-disk deletion it performs is removing the session's `plan/` subfolder. Everything else is the user's call after reviewing the diff — once they're happy, the `land` skill publishes it.
 
 ## Precondition
 
@@ -20,6 +20,18 @@ Re-derive what you need each time:
 - `SESSION_SLUG`: the single subfolder under `$KNOWLEDGE_CHECKOUT/plan/`. If there are zero (the session never went through `plan` or `implement`), generate one now (`YYYY-MM-DD-<short-description>`). If there are multiple, ask the user.
 
 ## Workflow
+
+### 0. Sync with upstream
+
+Before writing anything, pull the latest knowledge state into the session worktree so this session's edits land on top of any work other sessions have published since `init` ran:
+
+```sh
+cd "$KNOWLEDGE_CHECKOUT"
+git fetch origin main
+git merge --ff-only origin/main
+```
+
+The ff-merge should always succeed: the session branch was created from `main` at `init` time and no skill commits to it before `finalize`. If it fails (e.g. the user committed something on the branch by hand, or the working tree has conflicting uncommitted changes), stop and tell the user — don't try to resolve it.
 
 ### 1. Take stock
 
@@ -108,6 +120,6 @@ Run `git -C "$KNOWLEDGE_CHECKOUT" status` and `git -C "$KNOWLEDGE_CHECKOUT" diff
 
 - What files were created, modified, deleted.
 - The path to `$KNOWLEDGE_CHECKOUT` so they can review the diff in their editor (also accessible as `.knowledge/` inside the VS Code worktree).
-- That commit, merge, removal of the `.knowledge` symlink, and (if applicable) worktree cleanup are theirs to do.
+- Once they're happy with the diff, the `land` skill commits it, fast-forward-merges into `main`, pushes, and tears down the session worktree.
 
-Do not run `git add`, `git commit`, `git push`, `git merge`, `git worktree remove`, or `rm` on the `.knowledge` symlink.
+Do not run `git add`, `git commit`, `git push`, `git merge`, `git worktree remove`, or `rm` on the `.knowledge` symlink. That is `land`'s job.

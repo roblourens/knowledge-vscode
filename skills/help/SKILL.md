@@ -30,7 +30,8 @@ The knowledge base has four kinds of content:
 - **`explore`** — ask questions about how the agent host works, or iterate on an idea, with knowledge docs and source loaded as context. Writes nothing. Use when you don't know yet whether you want to plan or implement anything.
 - **`plan`** — research a change with prior knowledge as context, run a discovery → alignment → design → refinement loop, and write `plan.md` and `tasks.md` under `plan/<session-slug>/`. Never edits VS Code source. Use for non-trivial work.
 - **`implement`** — do the actual coding work, augmented by the relevant docs and (if one exists) the session plan. Tracks discoveries inline in `tasks.md` for finalize to pick up. Use for small changes directly, or after `plan` for large ones.
-- **`finalize`** — capture what was learned: update affected docs, create new docs if needed, write a `changes/<session-slug>/summary.md`, clean up `plan/<session-slug>/`, and report the diff. **Does not commit.** You review and commit yourself.
+- **`finalize`** — capture what was learned: pull latest from `origin/main`, update affected docs, create new docs if needed, write a `changes/<session-slug>/summary.md`, clean up `plan/<session-slug>/`, and report the diff. **Does not commit.** You review the diff, then run `land`.
+- **`land`** — commit the finalized edits, fast-forward-merge the session branch into `main`, push to `origin`, and tear down the session worktree + `.knowledge` symlink. Run after you've reviewed the diff `finalize` produced.
 - **`reconcile`** — periodically (weekly, after teammates' PRs land), update stale docs against the current `origin/main`. Driven by Git history since each doc's baseline SHA, so docs whose covered paths haven't changed are presumed current and skipped. Updates docs in place; doesn't produce a report.
 
 ### Typical workflow
@@ -38,7 +39,7 @@ The knowledge base has four kinds of content:
 1. Start a chat session in your VS Code worktree. Ask me to plan or implement something in the agent host.
 2. Behind the scenes, `init` runs once to set up `.knowledge/` for this session.
 3. For non-trivial work: `plan` produces a plan you review and approve, then `implement` works through it. For smaller changes: skip straight to `implement`.
-4. When the work is done, `finalize` writes the doc updates and change entry. You review the diff in `.knowledge/`, commit, and (optionally) merge or remove the session worktree.
+4. When the work is done, `finalize` writes the doc updates and change entry. You review the diff in `.knowledge/`. Once you're happy, `land` commits, ff-merges into `main`, pushes, and tears down the session worktree.
 
 Periodically: `reconcile` brings stale docs back in sync with `origin/main`.
 
@@ -46,7 +47,7 @@ Periodically: `reconcile` brings stale docs back in sync with `origin/main`.
 
 - **Code is the source of truth.** Docs are a starting point, not a substitute for reading code. When they disagree, update the doc.
 - **One concern per doc.** If `Covers:` doesn't fit in a sentence, split it.
-- **Skills don't commit.** `finalize` and `reconcile` write changes and surface the diff; you commit.
+- **Skills don't auto-commit.** `finalize` and `reconcile` write changes and surface the diff; you review, then `land` (or commit by hand).
 - **No agent memory.** Session state is re-derived from the filesystem (`.knowledge/` symlink + the single `plan/<slug>/` subfolder) on every skill invocation.
 - **Branch + worktree per session.** Concurrent VS Code sessions — including the same task run with different models for comparison — get isolated knowledge branches so they can't influence each other mid-flight.
 
@@ -61,4 +62,4 @@ Periodically: `reconcile` brings stale docs back in sync with `origin/main`.
 
 ## After explaining
 
-Ask the user what they want to do next, and offer to invoke the relevant skill — `explore` for questions or iterating on an idea, `plan` for non-trivial work, `implement` for smaller changes, `reconcile` for a periodic drift check.
+Ask the user what they want to do next, and offer to invoke the relevant skill — `explore` for questions or iterating on an idea, `plan` for non-trivial work, `implement` for smaller changes, `finalize` to capture a finished session, `land` to publish a finalized session, `reconcile` for a periodic drift check.

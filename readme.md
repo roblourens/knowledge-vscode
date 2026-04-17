@@ -8,7 +8,7 @@ This repo *is* the knowledge repo. It is not checked into the VS Code repo and l
 
 For editing convenience, `init` also symlinks the session's knowledge checkout into the VS Code worktree as `.knowledge/`, and adds `.knowledge` to the VS Code repo's `.git/info/exclude` so it never appears in upstream commits. The symlink is purely a UX convenience — the skills themselves resolve the knowledge repo independently of it, and an agent or user can edit either through `.knowledge/` or directly in the knowledge checkout.
 
-The system has two parts: a **knowledge repo** (this repo) containing docs, change logs, and task guidance, and a **VS Code agent plugin** (also in this repo, in the same Team Kit-style agent plugin format used by `vscode-team-kit`) that ships a set of skills (`init`, `plan`, `implement`, `finalize`, `reconcile`, `help`) which manage the lifecycle of locating the repo, planning, implementing, documenting, and validating. Installing the plugin registers the skills under the plugin's namespace in VS Code (e.g. `<plugin>:plan`, `<plugin>:implement`).
+The system has two parts: a **knowledge repo** (this repo) containing docs, change logs, and task guidance, and a **VS Code agent plugin** (also in this repo, in the same Team Kit-style agent plugin format used by `vscode-team-kit`) that ships a set of skills (`init`, `explore`, `plan`, `implement`, `finalize`, `land`, `reconcile`, `help`) which manage the lifecycle of locating the repo, planning, implementing, documenting, publishing, and validating. Installing the plugin registers the skills under the plugin's namespace in VS Code (e.g. `<plugin>:plan`, `<plugin>:implement`).
 
 ---
 
@@ -179,21 +179,38 @@ This skill is deliberately lightweight. It's the normal agent coding workflow, a
 
 **Behavior:**
 
-Finalize writes changes into the session's knowledge worktree. It does **not** commit, push, merge, or remove the worktree — that's the user's call after reviewing the diff. Cleanup of the session's `plan/` subfolder is the only on-disk deletion finalize performs.
+Finalize writes changes into the session's knowledge worktree. It does **not** commit, push, merge, or remove the worktree — that's the user's call after reviewing the diff. Cleanup of the session's `plan/` subfolder is the only on-disk deletion finalize performs. Once the user is happy with the diff, the `land` skill publishes it.
 
-1. Review the conversation history for the current session. Identify:
+1. Sync with upstream: in the session worktree, `git fetch origin main` then `git merge --ff-only origin/main` so this session's edits land on top of any work other sessions have published since `init` ran. If the merge isn't fast-forward, stop and report.
+2. Review the conversation history for the current session. Identify:
    - New understanding about components that should be added to or updated in existing docs.
    - Context that was missing from the knowledge base but turned out to be relevant — things the agent had to discover by reading code that should be documented for future sessions.
    - Decisions that were made and their rationale.
-2. Update relevant files in `docs/`:
+3. Update relevant files in `docs/`:
    - Add or revise descriptions of components.
    - Update cross-references if relationships changed.
    - Append a changelog entry with today's date, the current HEAD SHA (of the VS Code working branch), and a short description.
    - When creating a brand-new doc, give it an initial changelog entry as described in the `docs/` section above.
-3. Create a new entry in `changes/` under a `YYYY-MM-DD-short-description/` subfolder with a `summary.md`: what was done, decisions made, and anything noteworthy.
-4. Update `index.md` if new docs were created.
-5. Delete this session's subfolder under `plan/`.
-6. Report the resulting diff to the user so they can review, commit, and (optionally) merge / clean up the session worktree and remove the `.knowledge` symlink themselves.
+4. Create a new entry in `changes/` under a `YYYY-MM-DD-short-description/` subfolder with a `summary.md`: what was done, decisions made, and anything noteworthy.
+5. Update `index.md` if new docs were created.
+6. Delete this session's subfolder under `plan/`.
+7. Report the resulting diff to the user so they can review it. Once they're happy, they invoke `land`.
+
+### `land`
+
+**Purpose:** Publish the session's finalized knowledge edits back to `main` and tear down the session worktree.
+
+**Precondition:** `finalize` must have run for this session — the script refuses unless `changes/<slug>/summary.md` exists.
+
+**Behavior:**
+
+1. Stage and commit any pending edits in the session worktree. Commit message defaults to the first `# heading` of `summary.md`; `-m` overrides.
+2. `git fetch origin main` and fast-forward the session branch over `origin/main`. If not ff, stop — the user resolves manually.
+3. In the main knowledge checkout, ff-pull `origin/main`, then ff-merge the session branch.
+4. Push `main` to `origin` (unless `--no-push`).
+5. Remove the `.knowledge` symlink, the session worktree, and the session branch.
+
+Land is intentionally fast-forward-only at every step. If the session branch and `origin/main` have actually diverged (rare — docs change infrequently and most sessions touch different docs), the script bails and the user resolves it. The skill never tries to auto-merge prose conflicts.
 
 ### `reconcile`
 
@@ -225,7 +242,7 @@ A typical session:
 2. Start a chat session and ask the agent to plan or implement. The agent runs `init` automatically on first use — setting up a knowledge worktree on a matching branch.
 3. The agent uses `plan` for larger work, or jumps straight to `implement` for smaller changes.
 4. Do the work. Agent reads relevant docs and task guides as needed.
-5. Run `finalize` to capture what was learned as on-disk changes in the knowledge repo. Review the diff, then commit (and optionally merge / remove the session worktree) yourself.
+5. Run `finalize` to capture what was learned as on-disk changes in the knowledge repo. Review the diff. Once you're happy, run `land` to commit, fast-forward-merge into `main`, push to `origin`, and tear down the session worktree.
 
 Periodically (e.g., weekly, or after a batch of teammates' PRs land):
 
@@ -249,6 +266,6 @@ Periodically (e.g., weekly, or after a batch of teammates' PRs land):
 
 **Why `reconcile` updates docs in place rather than producing a report:** A drift report that the user has to act on adds friction and tends to rot. The point of running reconciliation is to *end up with current docs*, not to know how stale things are. The skill writes the updates and leaves the user to review the diff and commit — same shape as `finalize`.
 
-**Why `finalize` doesn't commit:** Finalize writes a meaningful diff into the knowledge repo (doc updates, a new `changes/` entry, plan cleanup). Auto-committing it would mix agent-generated content into history without a review step, and bundling commit + merge + worktree-removal into the skill makes it both fragile and hard to undo. Leaving commit and any worktree cleanup to the user keeps the skill simple, makes the diff reviewable, and matches `reconcile`'s shape.
+**Why `finalize` doesn't commit and `land` is a separate skill:** Finalize writes a meaningful diff into the knowledge repo (doc updates, a new `changes/` entry, plan cleanup). Auto-committing it would mix agent-generated content into history without a review step. Splitting publish into a second skill (`land`) preserves the review step while still automating the tedious part — commit, ff-merge into main, push, remove the worktree + symlink. Land is fast-forward-only at every step; if the branches have actually diverged it bails so the user can resolve manually. Same shape applies to `reconcile`: it writes the updates and leaves the user to review and (currently) commit by hand.
 
 **Why changelog SHAs reference the working branch, not the merge commit:** Recording the merge-to-main SHA would require coming back to the knowledge repo after the PR merges, which adds friction and will be forgotten. The working branch SHA is good enough — it anchors the entry in time, gives drift detection a baseline to diff against, and can be correlated with a PR if needed. Precision isn't worth the workflow cost.
