@@ -23,7 +23,10 @@ Docs in this knowledge base are scoped to *one component or concern* each, with 
 
 ## Docs
 
-- [agent-host-protocol](docs/agent-host-protocol.md) — the AHP wire contract: state, actions, reducers, capabilities, subscriptions, and how the generated `state/protocol/` source relates to the sibling `agent-host-protocol` repo. _Covers: src/vs/platform/agentHost/common/state/_
+Read in this order if you're new — each one assumes the previous.
+
+- [agent-host-topology](docs/agent-host-topology.md) — **start here.** The orientation doc: AHP's generic-protocol philosophy ("neither side is VS Code"), the two sanctioned convention exceptions (well-known config property names; tool-call kinds + metadata), the two-app topology (VS Code app vs Agents app, the latter still rooted at `src/vs/sessions/`), the three deployment configurations, and the where-to-put-new-code decision tree. _Covers: src/vs/platform/agentHost/, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostChatContribution.ts, src/vs/sessions/contrib/remoteAgentHost/_
+- [agent-host-protocol](docs/agent-host-protocol.md) — the AHP wire contract: state, actions, reducers, capabilities, subscriptions, action envelopes, and how the generated `state/protocol/` source relates to the sibling `agent-host-protocol` repo. _Covers: src/vs/platform/agentHost/common/state/_
 - [agent-host-session-handler](docs/agent-host-session-handler.md) — `AgentHostSessionHandler`, the shared adapter between AHP session state and VS Code chat sessions: turn dispatch, progress rendering, active-turn reconnect, server-initiated turns, permissions, client tools, file edits, terminals, subagents, auth retries, customization refs. _Covers: src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostSessionHandler.ts_
 
 _(More docs to come. As they're added, list them here with a one-line keyword-rich description plus a `Covers:` line.)_

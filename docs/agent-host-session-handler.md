@@ -2,7 +2,7 @@
 
 _Covers: src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostSessionHandler.ts_
 
-`AgentHostSessionHandler` is the shared adapter between **AHP session state** (see [agent-host-protocol](./agent-host-protocol.md)) and **VS Code chat sessions**. It powers chat for both standard VS Code (workbench) and the Sessions app — the difference is how sessions get exposed to the UI, not how a session itself is run.
+`AgentHostSessionHandler` is the **shared** adapter between AHP session state (see [agent-host-protocol](./agent-host-protocol.md)) and VS Code chat sessions. The same handler runs in all three deployment configurations — VS Code with a local agent host, the Agents app with a local agent host, and the Agents app with one or more remote agent hosts. For the topology and what `connectionAuthority` / `sessionType` mean, see [agent-host-topology](./agent-host-topology.md).
 
 ## What it owns
 
@@ -31,7 +31,23 @@ For each chat session backed by an Agent Host, the handler:
 
 ## Local vs. remote
 
-The handler is connection-agnostic: it works against `IAgentConnection`, which both the local and remote implementations satisfy. Lifecycle controls that are local-only (restart, WebSocket server startup) live on `IAgentHostService`, not on the handler.
+The handler is connection-agnostic: it works against `IAgentConnection`, which both the local and remote implementations satisfy. The same `AgentHostSessionHandler` class is constructed with a config like:
+
+```typescript
+interface IAgentHostSessionHandlerConfig {
+    readonly provider: AgentProvider;     // e.g. 'copilot'
+    readonly agentId: string;
+    readonly sessionType: string;          // identifies (host × agent) in chat sessions
+    readonly fullName: string;
+    readonly description: string;
+    readonly connection: IAgentConnection; // local MessagePort | remote WS/SSH/tunnel
+    readonly connectionAuthority: string;  // 'local' | sanitized remote name
+}
+```
+
+Local wiring is in `agentHostChatContribution.ts` (`AgentHostContribution`); remote wiring is in `src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHost.contribution.ts` (`RemoteAgentHostContribution`). They differ only in how `sessionType`, `connectionAuthority`, and `connection` are derived.
+
+Lifecycle controls that are local-only (restart, dev-mode startup) live on `IAgentHostService`, not on the handler. If the handler reaches for `IAgentHostService` instead of `IAgentConnection` for a behavior that should also work remotely, that's a bug.
 
 ## Editing through the handler vs. directly
 
@@ -65,8 +81,10 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 
 ## Related
 
+- [agent-host-topology](./agent-host-topology.md) — the two-app topology and three deployment configurations the handler runs in.
 - [agent-host-protocol](./agent-host-protocol.md) — the contract this handler consumes and dispatches against.
 
 ## Changelog
 
 - **2026-04-16** — `6cd94ddc6f` — initial entry. Captures the role of `AgentHostSessionHandler` as the shared local/remote adapter between AHP session state and VS Code chat sessions, including turn dispatch, progress rendering, active-turn reconnect, server-initiated turns, permissions, client tools, file edits, terminals, subagents, auth retries, and customization refs. Drawn from the prior `agent-host-chat-sessions` skill.
+- **2026-04-16** — `6cd94ddc6f` — added `IAgentHostSessionHandlerConfig` example showing the local-vs-remote seam, and cross-referenced the new topology doc.

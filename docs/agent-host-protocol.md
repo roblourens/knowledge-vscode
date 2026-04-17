@@ -2,7 +2,9 @@
 
 _Covers: src/vs/platform/agentHost/common/state/_
 
-The Agent Host Protocol is the wire contract between an AHP **client** (e.g., VS Code workbench, Sessions app, CLI tools) and an AHP **server** (the local utility process or a remote Agent Host). It is intentionally generic: VS Code is one client and the built-in Agent Host process is one server, but the protocol is meant to support other clients and other Agent Host implementations (Copilot SDK, Claude SDK, mock agents).
+The Agent Host Protocol is the wire contract between an AHP **client** and an AHP **server**. The protocol is deliberately generic: neither side is "VS Code." For why that matters and how the topology shakes out across the VS Code repo's two apps, read [agent-host-topology](./agent-host-topology.md) first.
+
+This doc is about the **contract itself** — state shapes, actions, subscriptions, capabilities, and where to edit them.
 
 The mental model is **JSON-RPC plus immutable state**:
 
@@ -12,15 +14,20 @@ The mental model is **JSON-RPC plus immutable state**:
 
 ## Where it lives
 
-- **Generated protocol surface:** `src/vs/platform/agentHost/common/state/protocol/` — files here say `DO NOT EDIT`. The external source of truth is the sibling repo `../agent-host-protocol`. Regenerate / sync from there when the contract changes.
-- **VS Code-facing re-exports and compatibility shims** (sit beside `protocol/`):
-  - `sessionProtocol.ts` — re-exports of the protocol surface used by client code.
-  - `sessionState.ts` — the shapes consumed by VS Code (root, session, terminal).
-  - `sessionActions.ts` — action types dispatched by clients and applied by the server.
-  - `sessionReducers.ts` — reducers used both server-side (for canonical state) and client-side (for optimistic application).
-  - `sessionCapabilities.ts` — capability flags for feature-detection across protocol versions.
-  - `agentSubscription.ts` — `AgentSubscriptionManager`, the client read model.
-  - `sessionTransport.ts` — transport abstractions (over MessagePort, WebSocket, etc).
+```
+src/vs/platform/agentHost/common/state/
+├── protocol/                 ← generated surface, DO NOT EDIT
+│                                source of truth: ../agent-host-protocol repo
+├── sessionProtocol.ts        ← re-exports of the protocol surface for client code
+├── sessionState.ts           ← root / session / terminal state shapes
+├── sessionActions.ts         ← action types dispatched by clients, applied by server
+├── sessionReducers.ts        ← reducers, used server-side AND client-side (optimistic)
+├── sessionCapabilities.ts    ← capability flags for feature-detection
+├── agentSubscription.ts      ← AgentSubscriptionManager — the client read model
+└── sessionTransport.ts       ← transport abstractions (MessagePort, WebSocket, ...)
+```
+
+When the contract changes, the workflow is: edit the [`agent-host-protocol`](https://github.com/microsoft/agent-host-protocol) repo first, regenerate the `protocol/` subdir here, then update the surrounding shims and the server handler.
 
 ## Resource addressing
 
@@ -32,16 +39,31 @@ State is URI-addressed.
 
 ## Subscriptions
 
-`AgentSubscriptionManager` (in `agentSubscription.ts`) gives clients a reactive read model:
+`AgentSubscriptionManager` (in `agentSubscription.ts`) gives clients a reactive read model. There are three subscription types:
 
-- **Session subscriptions** support optimistic write-ahead and reconciliation: a client can apply an action locally before the server confirms, then reconcile when the action envelope arrives with the server-assigned sequence number.
-- **Root and terminal subscriptions** are server-confirmed (no optimistic writes).
+| Subscription | Class | Optimistic writes? |
+|---|---|---|
+| Root | `RootStateSubscription` | No |
+| Session | `SessionStateSubscription` | **Yes** (write-ahead + reconcile) |
+| Terminal | `TerminalStateSubscription` | No |
 
-This is the right place to look when reasoning about what state a client sees vs. what the server has applied.
+Session subscriptions are the only ones with optimistic dispatch: a client applies its own action through the local reducer immediately, then reconciles when the server's `IActionEnvelope` echoes back with a sequence number. Root and terminal state are server-confirmed only.
+
+This is the right place to look when reasoning about what state a client sees vs. what the server has applied. Client code should always read state through a subscription — never reach for the server directly.
 
 ## Action envelopes
 
-Every server-applied action is wrapped in an `IActionEnvelope` that carries the server sequence number and (when applicable) the originating client's tag. Clients use the sequence number for replay-based reconnection and the origin tag to recognize their own optimistic actions coming back as confirmed.
+Every server-applied action is wrapped in an `IActionEnvelope`:
+
+```typescript
+interface IActionEnvelope {
+    readonly seq: number;        // server-assigned sequence number
+    readonly action: ISessionAction;
+    readonly origin?: string;    // tag of the client that dispatched (if any)
+}
+```
+
+The `seq` drives **replay-based reconnection**: a client that drops and reattaches asks for actions since its last seen `seq`, and the server fills in the gap (or sends a fresh snapshot if the gap is too large). The `origin` lets a client recognize its own optimistic action coming back as confirmed and reconcile it with what the server actually applied (which can differ — e.g. the server may have rejected or transformed it).
 
 ## Capabilities and versioning
 
@@ -68,11 +90,15 @@ Every server-applied action is wrapped in an `IActionEnvelope` that carries the 
 - **Prefer pure state and actions** over imperative side channels. If a behavior can be expressed as an action that updates state, do that — it gets reconnection and multi-client behavior for free.
 - **Don't bypass `AgentSubscriptionManager`** to read state from the server directly in client code. The subscription is the read model.
 - **The list API returns summaries, not full state.** A field that should appear in lists belongs on `ISessionSummary` / `IAgentSessionMetadata`, not on `ISessionState`. Pushing back on upstream protocol changes that put list fields on the wrong type is part of working in this layer.
+- **Keep agent-specific knowledge out of state types.** Tool calls expose generic display fields (`displayName`, `invocationMessage`, `pastTenseMessage`, `toolKind`); they never carry raw agent tool names. If you need new rendering behavior, add a new `toolKind` value (a well-known convention — see [agent-host-topology](./agent-host-topology.md#the-two-sanctioned-exceptions-well-known-conventions)), not a tool-name check.
+- **Capability flags, not silent behavior changes.** When a client must feature-detect server support, add a flag to `sessionCapabilities.ts`. Silent behavior changes break older clients against newer servers and vice versa.
 
 ## Related
 
+- [agent-host-topology](./agent-host-topology.md) — the philosophy behind "neither side is VS Code," the two-app topology, and the well-known conventions exception.
 - [agent-host-session-handler](./agent-host-session-handler.md) — how the workbench chat layer consumes session state and dispatches actions.
 
 ## Changelog
 
 - **2026-04-16** — `6cd94ddc6f` — initial entry. Captures the AHP architecture as of `origin/main`: generic JSON-RPC + immutable state, URI-addressed root / session / terminal resources, action envelopes with server sequence numbers, optimistic session subscriptions, server-confirmed root/terminal subscriptions, capability-flag versioning. Drawn from the prior `agent-host-chat-sessions` skill.
+- **2026-04-16** — `6cd94ddc6f` — added concrete `IActionEnvelope` shape, subscription-class table, file-tree view of `state/`, and a generic-types/capabilities gotcha cross-referencing the new topology doc.
