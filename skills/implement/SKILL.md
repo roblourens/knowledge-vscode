@@ -38,6 +38,8 @@ If `$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/plan.md` exists:
 
 Edit files in `$VSCODE_REPO`, run tests, iterate. Refer back to task guides under `$KNOWLEDGE_CHECKOUT/tasks/` whenever you hit a recurring concern (e.g., test strategies, interactive verification, cross-repo coordination).
 
+**As you go, keep `tasks.md` current.** If a `tasks.md` exists for this session, after completing each task update it in place: check the task off (`- [x] ...`) and add a short inline note for any deviation from the plan (e.g. `- note: implemented as X instead of Y because Z`). Don't batch this to the end — keep the file in sync with reality task by task. This is what `finalize` reads to write the change summary, and it lets the user see progress at a glance.
+
 If during implementation you discover that a knowledge doc is wrong or incomplete, **do not fix it now** — note the discrepancy at the bottom of the session's `tasks.md`:
 
 ```markdown
