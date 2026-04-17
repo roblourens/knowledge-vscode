@@ -15,7 +15,7 @@ Knowledge repo must be set up. If `$VSCODE_REPO/.knowledge` doesn't exist as a s
 
 Re-derive what you need each time:
 
-- `KNOWLEDGE_CHECKOUT = realpath "$VSCODE_REPO/.knowledge"`
+- `KNOWLEDGE_CHECKOUT = "$VSCODE_REPO/.knowledge"` (the symlink path itself; don't dereference it)
 - `VSCODE_REPO` from `git rev-parse` against the workspace root.
 
 Reconciliation is normally run from the main VS Code checkout, against `origin/main`. If running from a worktree on a feature branch, ask the user whether to reconcile against `origin/main` (recommended) or `HEAD`.

@@ -13,7 +13,7 @@ Knowledge repo must be set up. If `$VSCODE_REPO/.knowledge` doesn't exist as a s
 
 Re-derive what you need each time:
 
-- `KNOWLEDGE_CHECKOUT = realpath "$VSCODE_REPO/.knowledge"`
+- `KNOWLEDGE_CHECKOUT = "$VSCODE_REPO/.knowledge"` (the symlink path itself; don't dereference it)
 - `SESSION_SLUG`: the single subfolder under `$KNOWLEDGE_CHECKOUT/plan/`. If there are zero, you'll create one in step 2 below. If there are multiple, ask the user which session this is.
 
 ## Workflow

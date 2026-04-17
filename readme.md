@@ -121,14 +121,13 @@ The skills locate the knowledge repo from a user-managed VS Code setting. The se
 **Behavior:**
 
 1. Resolve the path to the knowledge repo from the user-managed VS Code setting.
-2. Detect whether the current VS Code checkout is a worktree (i.e., not the main checkout).
-3. Determine a knowledge branch name based on the current VS Code branch (e.g., VS Code on `feature/agent-reconnect` → knowledge branch `feature/agent-reconnect`). If the branch already exists, check it out; otherwise, create it from `main`.
-4. If the VS Code checkout is a worktree, create a matching worktree of the knowledge repo at a conventional location (e.g., `.worktrees/<branch>` within the knowledge repo) and use it for this session. If the VS Code checkout is the main checkout, operate on the knowledge repo's main checkout directly on the chosen branch — no worktree needed.
-5. Symlink the chosen knowledge checkout into the VS Code worktree as `.knowledge/`. If `.knowledge` already exists and resolves to the correct checkout, leave it alone. If it exists and points somewhere else, surface the conflict to the user and stop.
-6. Make sure `.knowledge` is excluded from VS Code Git tracking: add `.knowledge` to `<vscode>/.git/info/exclude` if it isn't already there. (Use `info/exclude` rather than `.gitignore` so the exclusion is local and doesn't leak into upstream commits.)
-7. Read `index.md` from the resolved knowledge location and provide a brief summary of available context to the agent.
+2. Determine a knowledge branch name based on the current VS Code branch (e.g., VS Code on `feature/agent-reconnect` → knowledge branch `feature/agent-reconnect`). If the branch already exists, use it; otherwise create it from `main`.
+3. Create a worktree of the knowledge repo at `<knowledge-repo>/.worktrees/<branch>` for this session, on the chosen branch. Every session uses its own worktree, even when VS Code itself is in its main checkout — the flow is uniform and concurrent sessions never share a knowledge checkout.
+4. Symlink the chosen knowledge worktree into the VS Code workspace as `.knowledge/`. If `.knowledge` already exists and resolves to the correct checkout, leave it alone. If it exists and points somewhere else, surface the conflict to the user and stop.
+5. Make sure `.knowledge` is excluded from VS Code Git tracking: add `.knowledge` to `<vscode>/.git/info/exclude` if it isn't already there. (Use `info/exclude` rather than `.gitignore` so the exclusion is local and doesn't leak into upstream commits.)
+6. Read `index.md` from the resolved knowledge location and provide a brief summary of available context to the agent.
 
-**Concurrency:** Multiple VS Code worktrees can each have their own knowledge worktree, and multiple sessions on the *same* VS Code branch (e.g., the same task being run with different models for comparison) each get their own knowledge branch and worktree as well — disambiguated by appending a short suffix when a branch name is already in use. The point is that no two concurrent sessions ever share a knowledge checkout or branch, so they can't influence each other's docs/plans/changes mid-flight. Since knowledge docs change less frequently than code, merge conflicts at finalize time will be rare and easy to resolve (they're just prose).
+**Concurrency:** Every session gets its own knowledge branch and worktree. Multiple VS Code worktrees, and multiple sessions on the *same* VS Code branch (e.g., the same task being run with different models for comparison), are disambiguated by appending a short suffix when a branch name is already in use. The point is that no two concurrent sessions ever share a knowledge checkout or branch, so they can't influence each other's docs/plans/changes mid-flight. Since knowledge docs change less frequently than code, merge conflicts at finalize time will be rare and easy to resolve (they're just prose).
 
 ### `plan`
 
@@ -167,7 +166,7 @@ This skill is deliberately lightweight. It's the normal agent coding workflow, a
 
 **Behavior:**
 
-Finalize writes changes into the session's knowledge checkout (worktree if one was created, otherwise the main checkout on the session's branch). It does **not** commit, push, merge, or remove worktrees — that's the user's call after reviewing the diff. Cleanup of the session's `plan/` subfolder is the only on-disk deletion finalize performs.
+Finalize writes changes into the session's knowledge worktree. It does **not** commit, push, merge, or remove the worktree — that's the user's call after reviewing the diff. Cleanup of the session's `plan/` subfolder is the only on-disk deletion finalize performs.
 
 1. Review the conversation history for the current session. Identify:
    - New understanding about components that should be added to or updated in existing docs.
@@ -210,14 +209,14 @@ Finalize writes changes into the session's knowledge checkout (worktree if one w
 A typical session:
 
 1. Create a VS Code worktree for a feature branch (or work in the main checkout).
-2. Start a chat session and ask the agent to plan or implement. The agent runs `init` automatically on first use — setting up a knowledge worktree if VS Code is in a worktree, or using the knowledge repo's main checkout otherwise.
+2. Start a chat session and ask the agent to plan or implement. The agent runs `init` automatically on first use — setting up a knowledge worktree on a matching branch.
 3. The agent uses `plan` for larger work, or jumps straight to `implement` for smaller changes.
 4. Do the work. Agent reads relevant docs and task guides as needed.
 5. Run `finalize` to capture what was learned as on-disk changes in the knowledge repo. Review the diff, then commit (and optionally merge / remove the session worktree) yourself.
 
 Periodically (e.g., weekly, or after a batch of teammates' PRs land):
 
-6. Run `reconcile` from the main checkout to update stale docs against the current VS Code codebase.
+6. Run `reconcile` from any session's worktree to update stale docs against the current VS Code codebase.
 
 ---
 
@@ -227,7 +226,7 @@ Periodically (e.g., weekly, or after a batch of teammates' PRs land):
 
 **Why both a plugin and a `.knowledge/` symlink:** The skills resolve the knowledge repo independently — they don't *need* the symlink to function. The symlink exists purely so the knowledge repo appears to live inside the VS Code workspace, which makes it much easier for both the human and the agent to read and edit knowledge files alongside the code (open in the same editor window, search across both, etc.). The plugin handles invocation and discovery; the symlink handles editing UX. They're orthogonal and complementary. `.knowledge` is added to the VS Code repo's `.git/info/exclude` (not `.gitignore`) so the exclusion stays local and never leaks upstream.
 
-**Why a worktree-and-branch per session for the knowledge repo:** Two concerns push toward isolation. (1) Concurrent sessions in different VS Code worktrees can both want to write docs/plans/changes; sharing a single knowledge checkout would mean stepping on each other's working tree state. (2) It's common to run the *same task* in parallel sessions — e.g., comparing different models on the same problem — and those sessions should not see each other's in-progress docs or plans, otherwise they influence each other. A branch + (when applicable) worktree per session gives each one a clean room. Since knowledge docs change infrequently and most sessions touch different docs, the merge cost at finalize time is low. `finalize` does not need a worktree of its own beyond what `init` already set up.
+**Why a worktree-and-branch per session for the knowledge repo:** Two concerns push toward isolation. (1) Concurrent sessions in different VS Code worktrees can both want to write docs/plans/changes; sharing a single knowledge checkout would mean stepping on each other's working tree state. (2) It's common to run the *same task* in parallel sessions — e.g., comparing different models on the same problem — and those sessions should not see each other's in-progress docs or plans, otherwise they influence each other. A branch + worktree per session gives each one a clean room. We do this unconditionally — even when VS Code itself is in its main checkout — because the alternative (conditional worktree) adds a fork in the flow without buying anything: the knowledge repo's main checkout would just become another shared resource that two sessions could collide on. Since knowledge docs change infrequently and most sessions touch different docs, the merge cost at finalize time is low. `finalize` does not need a worktree of its own beyond what `init` already set up.
 
 **Why mostly flat `docs/` instead of mirroring the VS Code repo's directory structure:** The VS Code repo is deep and complex. Mirroring it would create empty directories, hard-to-find files, and maintenance overhead, and it would also force each doc to live at one canonical location even though many docs cut across the tree (protocols, lifecycles, patterns). Flat files with descriptive names, declared `Covers:` paths, and cross-references in `index.md` are easier to browse and maintain. We're starting flat and will revisit if the file count grows past what's comfortable to skim.
 

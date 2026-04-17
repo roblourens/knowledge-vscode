@@ -15,7 +15,7 @@ Knowledge repo must be set up. If `$VSCODE_REPO/.knowledge` doesn't exist as a s
 
 Re-derive what you need each time:
 
-- `KNOWLEDGE_CHECKOUT = realpath "$VSCODE_REPO/.knowledge"`
+- `KNOWLEDGE_CHECKOUT = "$VSCODE_REPO/.knowledge"` (the symlink path itself; don't dereference it)
 - `VSCODE_REPO`, `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
 
 ## Workflow
