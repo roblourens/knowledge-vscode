@@ -37,22 +37,13 @@ The skills don't store session state in agent memory. Every skill re-derives wha
 
 This keeps the system stateless from the agent's perspective and avoids the agent-memory dependency.
 
-## Orienting the agent
+## Orienting
 
-Read `$KNOWLEDGE_CHECKOUT/index.md` and report a concise summary to the agent:
-
-- Which docs and tasks exist (names + one-line descriptions).
-- The most recent two or three entries in `changes/` (titles only).
-
-Do not dump the full file contents — the agent will pull in specific docs as the task demands.
+Read `$KNOWLEDGE_CHECKOUT/index.md` for context on what's in the knowledge base. That's it — you'll pull in specific docs and task guides as the work demands.
 
 ## Output
 
-Tell the user exactly:
-1. The knowledge worktree path and branch (from the script's `knowledge-worktree` / `knowledge-branch` lines).
-2. Whether it was `created`, `reused`, or recreated after `stale-with-work`.
-3. That `.knowledge/` is now symlinked into the VS Code worktree (and excluded from Git).
-4. A one-line summary of what the knowledge base currently covers.
+Tell the user briefly that `.knowledge/` is set up in the VS Code workspace. They don't need the worktree path or branch name unless something went wrong (`stale-with-work` recreate or `conflict`) — in those cases, surface the relevant detail.
 ---
 name: init
 description: "Set up the VS Code agent host knowledge repo for the current session. Use when starting work that touches the agent host subsystem, or when any other skill in this plugin needs the repo and it hasn't been initialized yet. Triggers include 'init knowledge', 'set up knowledge repo', or any first invocation of plan / implement / finalize / reconcile in this session."
