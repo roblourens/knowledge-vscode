@@ -27,6 +27,7 @@ The knowledge base has four kinds of content:
 ### Skills and when to use them
 
 - **`init`** — sets up the knowledge repo for the current session: chooses a branch (usually mirroring the VS Code branch), creates a worktree if VS Code is in one, symlinks the checkout to `.knowledge/`, and excludes it from the VS Code repo's Git tracking. **You usually don't invoke this directly** — the other skills run it automatically when needed.
+- **`explore`** — ask questions about how the agent host works, or iterate on an idea, with knowledge docs and source loaded as context. Writes nothing. Use when you don't know yet whether you want to plan or implement anything.
 - **`plan`** — research a change with prior knowledge as context, run a discovery → alignment → design → refinement loop, and write `plan.md` and `tasks.md` under `plan/<session-slug>/`. Never edits VS Code source. Use for non-trivial work.
 - **`implement`** — do the actual coding work, augmented by the relevant docs and (if one exists) the session plan. Tracks discoveries inline in `tasks.md` for finalize to pick up. Use for small changes directly, or after `plan` for large ones.
 - **`finalize`** — capture what was learned: update affected docs, create new docs if needed, write a `changes/<session-slug>/summary.md`, clean up `plan/<session-slug>/`, and report the diff. **Does not commit.** You review and commit yourself.
@@ -60,4 +61,4 @@ Periodically: `reconcile` brings stale docs back in sync with `origin/main`.
 
 ## After explaining
 
-Ask the user what they want to do next, and offer to invoke the relevant skill — `plan` for non-trivial work, `implement` for smaller changes, `reconcile` for a periodic drift check.
+Ask the user what they want to do next, and offer to invoke the relevant skill — `explore` for questions or iterating on an idea, `plan` for non-trivial work, `implement` for smaller changes, `reconcile` for a periodic drift check.

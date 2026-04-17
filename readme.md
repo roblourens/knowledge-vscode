@@ -129,6 +129,19 @@ The skills locate the knowledge repo from a user-managed VS Code setting. The se
 
 **Concurrency:** Every session gets its own knowledge branch and worktree. Multiple VS Code worktrees, and multiple sessions on the *same* VS Code branch (e.g., the same task being run with different models for comparison), are disambiguated by appending a short suffix when a branch name is already in use. The point is that no two concurrent sessions ever share a knowledge checkout or branch, so they can't influence each other's docs/plans/changes mid-flight. Since knowledge docs change less frequently than code, merge conflicts at finalize time will be rare and easy to resolve (they're just prose).
 
+### `explore`
+
+**Purpose:** Answer questions about how the agent host works, or iterate on an idea, with knowledge docs and source loaded as context. Writes nothing.
+
+**Precondition:** Knowledge repo is set up. If not, run `init` automatically before continuing.
+
+**Behavior:**
+
+1. Read `index.md` and any `docs/` whose `Covers:` overlaps with the question.
+2. Read the relevant source — docs are a starting point, not a substitute for the code.
+3. Answer concretely, citing specific functions, types, and source files. If iterating on an idea, surface trade-offs and prior art in the codebase.
+4. Write nothing — no `plan/`, `tasks/`, `docs/`, or `changes/` updates, and no code in `$VSCODE_REPO`. If the conversation produces an idea worth keeping, suggest moving to `plan` or `implement`.
+
 ### `plan`
 
 **Purpose:** Plan a change by reading relevant knowledge context and producing a task list.
