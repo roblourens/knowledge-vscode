@@ -35,6 +35,12 @@ _(More docs to come. As they're added, list them here with a one-line keyword-ri
 
 _(Task guides — reusable how-to references for recurring work patterns — go here as they're written. Examples to come: `updating-the-protocol`, `test-strategies`, `interactive-verification`.)_
 
+## Active debt & gotchas
+
+Cross-cutting items only. Per-component items live in each doc's `## Debt & gotchas` section — always read it for any doc whose `Covers:` overlaps your task.
+
+_(No cross-cutting items recorded yet. Add a bullet here when something spans multiple docs or affects how to work across the subsystem as a whole — e.g. "protocol layer mid-migration to v3, see [agent-host-protocol](docs/agent-host-protocol.md)".)_
+
 ## Recent changes
 
 The `changes/` directory contains one subfolder per significant session, named `YYYY-MM-DD-short-description/`. Browse it directly for the narrative of how the system has evolved. The most recent few entries are usually the most useful context when working on adjacent areas.
@@ -44,4 +50,7 @@ The `changes/` directory contains one subfolder per significant session, named `
 - **Doc scope:** one component or concern per doc, with a `Covers:` line listing the VS Code paths the doc is primarily concerned with. If the `Covers:` list doesn't fit in a sentence, the doc is too broad — split it.
 - **Cross-linking:** plain Markdown relative links inline where relevant. This index is the only file that tries to be exhaustive.
 - **Changelog per doc:** every doc ends with a `Changelog` section. Each entry: `**YYYY-MM-DD** — <short SHA> — <summary>`. Use a 10-character abbreviated SHA (e.g. via `git rev-parse --short=10`) — readable, and still unambiguous in practice. The most recent entry's SHA is the baseline that `reconcile` diffs against.
+- **Debt & gotchas per doc:** every doc has a `## Debt & gotchas` section between the body and the changelog. Two kinds of entries, each one bullet line, dated, with the relevant file/symbol:
+  - **`gotcha`** — "X is the way it is on purpose; if you touch it, do Y." Load-bearing weirdness; presumed permanent.
+  - **`debt`** — "Y looks wrong / could be cleaned up / needs revisiting." Has an implicit lifetime; resolved when fixed. Example: `- **debt** (2026-04-17, agentSessionService.ts:registerProvider) — provider registration is duplicated in two code paths; should be unified once protocol v3 lands.`
 - **Source of truth is the code.** When a doc and the code disagree, the code wins. Update the doc.

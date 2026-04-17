@@ -144,6 +144,10 @@ If you can't place a piece of code in exactly one of these buckets, that's the m
 - [agent-host-protocol](./agent-host-protocol.md) — the wire contract this doc is the philosophy for.
 - [agent-host-session-handler](./agent-host-session-handler.md) — the shared handler used in all three configurations.
 
+## Debt & gotchas
+
+_(Empty for now. Entries take the form `- **debt|gotcha** (YYYY-MM-DD, file:symbol) — description`.)_
+
 ## Changelog
 
 - **2026-04-16** — `6cd94ddc6f` — initial entry. Captures the AHP generic-protocol philosophy (neither client nor server is "VS Code"), the two sanctioned convention exceptions (well-known config property names; tool-call kinds + metadata), the two-app topology (VS Code app vs Agents app — the latter still rooted at `src/vs/sessions/`), the three deployment configurations (VS Code + local; Agents + local; Agents + remote × N), the `IAgentConnection` / `AgentHostSessionHandler` shared seam with `connectionAuthority` and `sessionType` as the only per-configuration variations, and the where-to-put-new-code decision tree.

@@ -98,6 +98,10 @@ The `seq` drives **replay-based reconnection**: a client that drops and reattach
 - [agent-host-topology](./agent-host-topology.md) — the philosophy behind "neither side is VS Code," the two-app topology, and the well-known conventions exception.
 - [agent-host-session-handler](./agent-host-session-handler.md) — how the workbench chat layer consumes session state and dispatches actions.
 
+## Debt & gotchas
+
+_(Empty for now. Entries take the form `- **debt|gotcha** (YYYY-MM-DD, file:symbol) — description`.)_
+
 ## Changelog
 
 - **2026-04-16** — `6cd94ddc6f` — initial entry. Captures the AHP architecture as of `origin/main`: generic JSON-RPC + immutable state, URI-addressed root / session / terminal resources, action envelopes with server sequence numbers, optimistic session subscriptions, server-confirmed root/terminal subscriptions, capability-flag versioning. Drawn from the prior `agent-host-chat-sessions` skill.

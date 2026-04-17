@@ -66,6 +66,10 @@ Each doc:
 - Explains how to work with it — key files, entry points, patterns to follow.
 - Describes how it relates to other components, with cross-references to other docs.
 - References specific files, classes, and functions in the VS Code repo by path. These references are what `reconcile` validates.
+- Has a **`## Debt & gotchas` section** between the body and the changelog, capturing things to revisit and load-bearing weirdness to preserve. Two entry types:
+  - **`gotcha`** — something is the way it is on purpose; if you touch it, do Y. Presumed permanent.
+  - **`debt`** — something looks wrong, could be cleaned up, or needs revisiting. Resolved when fixed.
+  Each entry is one bullet line: `- **<kind>** (YYYY-MM-DD, <file:symbol>) — <description>`.
 - Ends with a **changelog section**: a reverse-chronological list of entries, each with a date, Git SHA, and short description of what changed in the component or in this doc's understanding of it.
 
 **Cross-linking between docs:** Use plain Markdown links with relative paths (e.g., `[state sync protocol](./state-sync-protocol.md)`). Mention related docs inline where they're relevant rather than collecting them into a separate "See also" section — the goal is for an agent reading one doc to be naturally pulled to adjacent context. `index.md` is the only place that tries to be exhaustive about what exists.
@@ -263,6 +267,8 @@ Periodically (e.g., weekly, or after a batch of teammates' PRs land):
 **Why `changes/` is separate from `docs/`:** Docs are mutable descriptions of the current state. Changes are an immutable log of what happened. They serve different purposes: docs answer "how does this work?" and changes answer "why is it this way?" and "what was tried?" Both are useful, and conflating them would make docs bloated with historical narrative.
 
 **Why drift detection is driven by the VS Code Git history, not by re-reading every doc:** The naive approach — read each doc, re-read every code reference, compare — is expensive and scales badly as the knowledge base grows. The Git history is the cheaper signal: if nothing in the VS Code repo has changed in the area a doc describes since that doc's baseline, the doc is presumed still accurate. Only docs whose subject area has churned need a deeper read. This makes reconciliation cheap enough to run routinely.
+
+**Why debt and gotchas live per-doc instead of in a standalone debt doc:** A standalone debt doc is the obvious shape, but it rots quickly because nothing forces you to revisit it when the related code changes, and it duplicates context that already lives in the doc. Per-doc entries are loaded automatically whenever an agent reads the doc (because of `Covers:` overlap), and `reconcile` can validate `debt:` entries against the code in the same pass that validates the rest of the doc — if the debt was fixed, it can propose removing the entry. The cost of distribution is discoverability for cross-cutting items, which the index resolves with a small "Active debt & gotchas" pointer section.
 
 **Why `reconcile` updates docs in place rather than producing a report:** A drift report that the user has to act on adds friction and tends to rot. The point of running reconciliation is to *end up with current docs*, not to know how stale things are. The skill writes the updates and leaves the user to review the diff and commit — same shape as `finalize`.
 

@@ -45,9 +45,12 @@ If during implementation you discover that a knowledge doc is wrong or incomplet
 ```markdown
 ## Discoveries for finalize
 - <doc name>: <what's wrong / missing / surprising>
+- debt: <file:symbol> — <what looks wrong / could be cleaned up / needs revisiting>
+- gotcha: <file:symbol> — <what's load-bearing here that a future change must preserve>
+- resolved-debt: <doc name> — <which existing `debt:` entry this session fixed>
 ```
 
-`finalize` will use this list when updating docs.
+`finalize` will use this list when updating docs and the per-doc `## Debt & gotchas` sections. Be deliberate about `gotcha:` — only add when you've found something genuinely load-bearing that someone would naively "clean up" and break.
 
 ### 4. Stop at "implementation complete"
 

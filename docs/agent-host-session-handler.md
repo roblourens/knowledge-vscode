@@ -84,6 +84,10 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 - [agent-host-topology](./agent-host-topology.md) — the two-app topology and three deployment configurations the handler runs in.
 - [agent-host-protocol](./agent-host-protocol.md) — the contract this handler consumes and dispatches against.
 
+## Debt & gotchas
+
+_(Empty for now. Entries take the form `- **debt|gotcha** (YYYY-MM-DD, file:symbol) — description`.)_
+
 ## Changelog
 
 - **2026-04-16** — `6cd94ddc6f` — initial entry. Captures the role of `AgentHostSessionHandler` as the shared local/remote adapter between AHP session state and VS Code chat sessions, including turn dispatch, progress rendering, active-turn reconnect, server-initiated turns, permissions, client tools, file edits, terminals, subagents, auth retries, and customization refs. Drawn from the prior `agent-host-chat-sessions` skill.

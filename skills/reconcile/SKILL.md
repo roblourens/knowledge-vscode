@@ -64,6 +64,7 @@ For each doc that needs changes (from steps 3 or 4):
 - Update the body to match the current state of the code.
 - Update `Covers:` if the relevant paths shifted.
 - Update or remove inline references to deleted/renamed/moved symbols.
+- Revisit the `## Debt & gotchas` section (see step 5a).
 - Append a new changelog entry:
 
   ```markdown
@@ -74,12 +75,23 @@ For each doc that needs changes (from steps 3 or 4):
 
 If a doc has been *substantially* invalidated (the component it describes has been split, merged, or deleted), do not silently rewrite it — surface it to the user and ask whether to rewrite, split, or delete the doc.
 
+### 5a. Revisit Debt & gotchas
+
+For docs whose code area changed since baseline, re-evaluate the existing `## Debt & gotchas` entries:
+
+- For each `debt:` entry, check whether the underlying problem still exists in the current code. If the duplication / hack / mid-migration was resolved, propose removing the entry (don't silently delete — surface it in the report so the user can confirm).
+- For each `gotcha:` entry, check whether the load-bearing code it warns about still exists in the form it describes. If the file/symbol was substantially restructured, the gotcha may be stale or may need rewording — surface it.
+- Don't *add* new `debt`/`gotcha` entries during reconcile unless the code change you're documenting itself introduced the debt (e.g., a partial migration left two parallel code paths). Net-new debt and gotchas are `finalize`'s territory — they come out of doing the work, not auditing it.
+
+If the cross-cutting `## Active debt & gotchas` section in `index.md` references a doc whose entry you removed, also remove (or rephrase) the index pointer.
+
 ### 6. Report
 
 Once updates are written, summarize:
 
 - **Reconciled:** which docs were updated, and which VS Code commits drove each update.
 - **Presumed current:** count of docs with no changes since baseline. (List them only if the user asks.)
+- **Debt & gotchas changes:** list any `debt:` removals proposed and any `gotcha:` entries flagged as potentially stale, with the doc and the reason — the user confirms before they're removed.
 - **Needs human attention:** docs flagged for substantial invalidation in step 5.
 
 Do not commit. Tell the user the diff is ready for review at `$KNOWLEDGE_CHECKOUT`.

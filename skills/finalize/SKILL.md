@@ -50,6 +50,7 @@ For each existing doc in `$KNOWLEDGE_CHECKOUT/docs/` whose subject area was chan
 - Revise the doc body to reflect the new state.
 - Update the `Covers:` line if the set of relevant paths changed.
 - Update inline cross-references if relationships between components changed.
+- Update the `## Debt & gotchas` section (see step 2a).
 - Append a changelog entry to the doc's changelog section:
 
   ```markdown
@@ -57,6 +58,27 @@ For each existing doc in `$KNOWLEDGE_CHECKOUT/docs/` whose subject area was chan
   ```
 
   Use the current HEAD of `$VSCODE_BRANCH` for the SHA, abbreviated to 10 characters: `git -C "$VSCODE_REPO" rev-parse --short=10 HEAD`.
+
+### 2a. Update Debt & gotchas
+
+Review the conversation (and any `## Discoveries for finalize` notes left by `implement` in `tasks.md`) for things to record. Each doc has a `## Debt & gotchas` section between the body and the changelog — add or remove bullets as warranted.
+
+Three triggers:
+
+- **Resolved debt:** if this session fixed something a doc's `debt:` entry called out, **remove** the entry.
+- **New debt:** if you noticed something that looks wrong, is duplicated, is mid-migration, or should be revisited later — add a `debt:` entry.
+- **New gotcha:** if you discovered something is the way it is on purpose and a future agent could easily break it by "cleaning it up" — add a `gotcha:` entry. Be deliberate; gotchas are presumed permanent.
+
+Format (one bullet line):
+
+```markdown
+- **debt** (YYYY-MM-DD, <file:symbol>) — <one-line description of what's wrong and ideally how to fix>
+- **gotcha** (YYYY-MM-DD, <file:symbol>) — <what's load-bearing and what a future change should preserve>
+```
+
+If no `## Debt & gotchas` section exists in a doc that needs an entry, add one between the body and the `## Changelog`.
+
+If the new item is **cross-cutting** (spans multiple docs / affects how to work across the subsystem), also add a one-line pointer under `## Active debt & gotchas` in `$KNOWLEDGE_CHECKOUT/index.md` referencing the doc(s) where the detail lives. Don't duplicate the detail — just point.
 
 ### 3. Create new docs if needed
 
@@ -68,6 +90,10 @@ If something material was learned about a component that has no doc yet, create 
 _Covers: <vscode-relative path 1>, <path 2>, ..._
 
 <body — what it is, how it works, key files/classes/functions, how it relates to other components, with inline links to related docs as `[name](./other-doc.md)`>
+
+## Debt & gotchas
+
+_(Empty for now. Entries take the form `- **debt|gotcha** (YYYY-MM-DD, file:symbol) — description`.)_
 
 ## Changelog
 
