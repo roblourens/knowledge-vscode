@@ -133,7 +133,7 @@ The decision tree, in order:
 1. **Is it a contract change** (new state field, new action, new capability)? → It belongs in [`agent-host-protocol`](https://github.com/microsoft/agent-host-protocol) first, then regenerate `state/protocol/` here. See [agent-host-protocol](./agent-host-protocol.md).
 2. **Is it a new well-known convention** (property name, tool kind)? → Document it in the agent-host-protocol repo's conventions section; implement the recognition in the relevant VS Code adapter (the renderer for tool kinds; the appropriate UI for config property names). Don't put the well-known names into the protocol's TypeScript types.
 3. **Does it run a turn or render session state?** → `AgentHostSessionHandler` (works in all three configurations). See [agent-host-session-handler](./agent-host-session-handler.md).
-4. **Is it about *which* agents/sessions exist or how they're listed?** → A `*Contribution` (`AgentHostContribution` for local; `RemoteAgentHostContribution` for remote) and a `*SessionsProvider` (Agents app only).
+4. **Is it about *which* agents/sessions exist or how they're listed?** → Start at the provider/listing owner. SDK-backed local agents, for example, should filter or adopt sessions in the provider (`CopilotAgent.listSessions`) before generic `AgentService` aggregation or UI providers see them. Registration/list UI belongs in a `*Contribution` (`AgentHostContribution` for local; `RemoteAgentHostContribution` for remote) and a `*SessionsProvider` (Agents app only).
 5. **Is it Agents-app-only chrome** (sidebar, sessions view, titlebar widget)? → `src/vs/sessions/contrib/`.
 6. **Is it local-only lifecycle** (restart, port wiring, dev mode)? → `IAgentHostService` and friends, *not* the handler.
 
@@ -142,6 +142,7 @@ If you can't place a piece of code in exactly one of these buckets, that's the m
 ## Related
 
 - [agent-host-protocol](./agent-host-protocol.md) — the wire contract this doc is the philosophy for.
+- [copilot-agent-provider](./copilot-agent-provider.md) — provider-level Copilot SDK session ownership and local metadata behavior.
 - [agent-host-session-handler](./agent-host-session-handler.md) — the shared handler used in all three configurations.
 
 ## Debt & gotchas
@@ -151,3 +152,4 @@ _(Empty for now. Entries take the form `- **debt|gotcha** (YYYY-MM-DD, file:symb
 ## Changelog
 
 - **2026-04-16** — `6cd94ddc6f` — initial entry. Captures the AHP generic-protocol philosophy (neither client nor server is "VS Code"), the two sanctioned convention exceptions (well-known config property names; tool-call kinds + metadata), the two-app topology (VS Code app vs Agents app — the latter still rooted at `src/vs/sessions/`), the three deployment configurations (VS Code + local; Agents + local; Agents + remote × N), the `IAgentConnection` / `AgentHostSessionHandler` shared seam with `connectionAuthority` and `sessionType` as the only per-configuration variations, and the where-to-put-new-code decision tree.
+- **2026-04-17** — `9364e338cc` — clarified that SDK-backed providers own session filtering/adoption boundaries before generic aggregation or UI listing.
