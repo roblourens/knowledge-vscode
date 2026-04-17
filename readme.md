@@ -44,22 +44,36 @@ vscode-knowledge/
 
 The top-level entry point. Provides general context about the agent host subsystem: what it is, where it lives in the VS Code codebase, the major architectural layers, and a brief description of each doc and task file with links. An agent starting a session should read this file first to orient itself.
 
+**Retrieval:** For now, retrieval is intentionally simple — `index.md` plus keyword/search through `docs/` and `tasks/` is the whole story. Each doc and task entry in `index.md` should include a one-line description rich enough that keyword search finds it, plus a `Covers:` listing of the VS Code paths it concerns. If the knowledge base grows large enough that this stops being enough, we can add tags, embeddings, or a smarter retrieval skill later.
+
 ### `docs/`
 
-Each file covers a component or concern within the agent host. Files are flat (not nested) and named descriptively. Each doc:
+Each file covers **one component or concern** within the agent host. "Component" is deliberately loose — it can be:
 
+- a single file,
+- a single class within a file,
+- a folder or coherent set of files that work together,
+- or a cross-cutting concern (a protocol, a lifecycle, a pattern).
+
+The rule of thumb: a doc should have a small, declarable set of paths in the VS Code repo that it is *primarily* concerned with. If you can't list them in a sentence or two, the doc is probably trying to cover too much and should be split.
+
+Each doc:
+
+- Declares the VS Code paths it primarily covers (in a frontmatter block or a `Covers:` line near the top), so `knowledge-reconcile` knows which Git history to diff against.
 - Describes what the component is and what it does.
 - Explains how to work with it — key files, entry points, patterns to follow.
 - Describes how it relates to other components, with cross-references to other docs.
-- References specific files, classes, and functions in the VS Code repo by path. These references are what the `drift` skill validates.
+- References specific files, classes, and functions in the VS Code repo by path. These references are what `knowledge-reconcile` validates.
 - Ends with a **changelog section**: a reverse-chronological list of entries, each with a date, Git SHA, and short description of what changed in the component or in this doc's understanding of it.
+
+**Cross-linking between docs:** Use plain Markdown links with relative paths (e.g., `[state sync protocol](./state-sync-protocol.md)`). Mention related docs inline where they're relevant rather than collecting them into a separate "See also" section — the goal is for an agent reading one doc to be naturally pulled to adjacent context. `index.md` is the only place that tries to be exhaustive about what exists.
 
 **Every new doc starts with an initial changelog entry** — there is no doc without a baseline. The SHA used for that initial entry depends on context:
 
 - If the doc is describing existing state in the VS Code repo, use the current HEAD of `main`.
 - If the doc is describing something that's part of an in-flight change, use the current HEAD of whatever branch is checked out, even if it's a feature branch. (This case is a little TBD and may be refined later.)
 
-The changelog SHAs reference whatever commit was HEAD on the working branch at the time the entry was written. These don't need to be updated later when the PR merges to main — they serve as approximate anchors for "around when did this understanding change" and as the baseline drift detection diffs against, not as precise audit markers.
+The changelog SHAs reference whatever commit was HEAD on the working branch at the time the entry was written. These don't need to be updated later when the PR merges to main — they serve as approximate anchors for "around when did this understanding change" and as the baseline `knowledge-reconcile` diffs against, not as precise audit markers.
 
 Docs describe how things *are* and *why*, not how they *should be*. They are descriptive, not prescriptive. This makes them more durable than formal specs — rationale and architecture descriptions change less frequently than behavioral requirements.
 
@@ -110,9 +124,7 @@ The skills locate the knowledge repo from a user-managed VS Code setting. The se
 4. If the VS Code checkout is a worktree, create a matching worktree of the knowledge repo at a conventional location (e.g., `.worktrees/<branch>` within the knowledge repo) and use it for this session. If the VS Code checkout is the main checkout, operate on the knowledge repo's main checkout directly on the chosen branch — no worktree needed.
 5. Read `index.md` from the resolved knowledge location and provide a brief summary of available context to the agent.
 
-**Concurrency:** Multiple VS Code worktrees can each have their own knowledge worktree. The knowledge branches provide isolation. Since knowledge docs change less frequently than code, merge conflicts will be rare and easy to resolve (they're just prose).
-
-**Concurrency:** Multiple VS Code worktrees can each have their own knowledge worktree. The knowledge branches provide isolation. Since knowledge docs change less frequently than code, merge conflicts will be rare and easy to resolve (they're just prose).
+**Concurrency:** Multiple VS Code worktrees can each have their own knowledge worktree, and multiple sessions on the *same* VS Code branch (e.g., the same task being run with different models for comparison) each get their own knowledge branch and worktree as well — disambiguated by appending a short suffix when a branch name is already in use. The point is that no two concurrent sessions ever share a knowledge checkout or branch, so they can't influence each other's docs/plans/changes mid-flight. Since knowledge docs change less frequently than code, merge conflicts at finalize time will be rare and easy to resolve (they're just prose).
 
 ### `knowledge-plan`
 
@@ -147,11 +159,11 @@ This skill is deliberately lightweight. It's the normal agent coding workflow, a
 
 ### `knowledge-finalize`
 
-**Purpose:** Capture what was learned in this session back into the knowledge repo.
+**Purpose:** Capture what was learned in this session back into the knowledge repo as on-disk changes, ready for the user to review and commit.
 
 **Behavior:**
 
-Finalize does not require a knowledge worktree — it commits changes directly to the knowledge repo on the session's branch. If a worktree was created earlier by `knowledge-init` for this session, finalize uses it; otherwise it operates on the main checkout of the knowledge repo on the chosen branch.
+Finalize writes changes into the session's knowledge checkout (worktree if one was created, otherwise the main checkout on the session's branch). It does **not** commit, push, merge, or remove worktrees — that's the user's call after reviewing the diff. Cleanup of the session's `plan/` subfolder is the only on-disk deletion finalize performs.
 
 1. Review the conversation history for the current session. Identify:
    - New understanding about components that should be added to or updated in existing docs.
@@ -164,29 +176,28 @@ Finalize does not require a knowledge worktree — it commits changes directly t
    - When creating a brand-new doc, give it an initial changelog entry as described in the `docs/` section above.
 3. Create a new entry in `changes/` under a `YYYY-MM-DD-short-description/` subfolder with a `summary.md`: what was done, decisions made, and anything noteworthy.
 4. Update `index.md` if new docs were created.
-5. Clean up this session's subfolder under `plan/`.
-6. Commit the knowledge repo changes on the current branch.
-7. Merge the knowledge branch back to `main` (or leave it for the user to merge, depending on preference).
-8. If a knowledge worktree was created for this session, remove it.
+5. Delete this session's subfolder under `plan/`.
+6. Report the resulting diff to the user so they can review, commit, and (optionally) merge / clean up the session worktree themselves.
 
-### `knowledge-drift`
+### `knowledge-reconcile`
 
-**Purpose:** Check whether the knowledge docs are still accurate against the current state of the VS Code codebase, using the VS Code Git history as the driver — not by re-reading every doc against the code.
+**Purpose:** Detect drift between the knowledge docs and the current VS Code codebase, and **update the docs in place** to match. The goal of this skill is reconciliation, not reporting — a drift report is a side effect, not the deliverable.
+
+(Originally called `knowledge-drift`. Renamed because the skill's job is to *fix* drift, not just describe it.)
 
 **Precondition:** Knowledge repo is set up. If not, run `knowledge-init` automatically before continuing.
 
-**Key idea:** Each doc has a baseline anchor — the most recent changelog entry's SHA (and/or date) recording the last time the doc was reconciled with the code. Drift detection works by looking at what has changed in the VS Code repo *since* that baseline and asking whether any of those changes touch what the doc describes. If nothing relevant changed, the doc is presumed still accurate and is not re-read in detail. This avoids the expensive "read every word in every doc and validate against code" approach.
+**Key idea:** Each doc has a baseline anchor — the most recent changelog entry's SHA (and date) recording the last time the doc was reconciled with the code. Reconciliation works by looking at what has changed in the VS Code repo *since* that baseline and asking whether any of those changes touch what the doc describes. If nothing relevant changed, the doc is presumed still accurate and is not re-read in detail. This avoids the expensive "read every word in every doc and validate against code" approach.
 
 **Behavior:**
 
-1. For each doc in `docs/`, read its latest changelog entry to get a baseline SHA (and date) in the VS Code repo.
-2. For each doc, gather the set of code references it makes (file paths, class/function names, directories).
-3. Compute the set of VS Code commits between each doc's baseline SHA and the current HEAD. Inspect the changed files / symbols in that commit range.
-4. Intersect the changed paths/symbols with the references each doc makes. Docs with no overlap are flagged as "presumed current" and skipped — no re-validation needed.
-5. For docs with overlap, drill in: read the relevant changed code (and the relevant commits) and compare against the doc's description. Decide whether the doc is still accurate, has stale references, or has semantic drift.
-6. Separately, do a cheap mechanical pass for any references that point to files or symbols that have been deleted, renamed, or moved entirely (regardless of baseline), since those are unambiguous staleness signals.
-7. Produce a drift report: docs presumed current, docs with stale references, docs with semantic drift, and which VS Code commits triggered each finding.
-8. Optionally, update the docs in place with corrected references and descriptions, appending a changelog entry noting the drift correction and the new baseline SHA.
+1. For each doc in `docs/`, read its declared `Covers:` paths and its latest changelog entry to get a baseline SHA (and date).
+2. For each doc, gather the set of code references it makes (file paths, class/function names, directories) in addition to the declared paths.
+3. Compute the set of VS Code commits between each doc's baseline SHA and the current HEAD of `origin/main` (not local `main`, which may be stale). If the baseline SHA no longer exists in `origin/main`'s history (e.g., the branch it was on was rebased or abandoned), fall back to `git log --since=<baseline date> -- <covers paths>`. Inspect the changed files and symbols in that commit range.
+4. Intersect the changed paths/symbols with each doc's covered paths and references. Docs with no overlap are presumed current and skipped — no re-validation needed.
+5. For docs with overlap, drill in: read the relevant changed code (and the relevant commits) and compare against the doc's description. Update the doc in place to reflect the current state, and append a changelog entry noting the reconciliation and the new baseline SHA.
+6. Separately, do a cheap mechanical pass for any references that point to files or symbols that have been deleted, renamed, or moved entirely (regardless of baseline) — fix those too.
+7. Summarize what was changed (which docs were updated, which were presumed current, which VS Code commits drove each update) so the user can review the diff.
 
 ---
 
@@ -198,11 +209,11 @@ A typical session:
 2. Start a chat session and ask the agent to plan or implement. The agent runs `knowledge-init` automatically on first use — setting up a knowledge worktree if VS Code is in a worktree, or using the knowledge repo's main checkout otherwise.
 3. The agent uses `knowledge-plan` for larger work, or jumps straight to `knowledge-implement` for smaller changes.
 4. Do the work. Agent reads relevant docs and task guides as needed.
-5. Run `knowledge-finalize` to capture what was learned, commit to the knowledge repo, and clean up any session worktree.
+5. Run `knowledge-finalize` to capture what was learned as on-disk changes in the knowledge repo. Review the diff, then commit (and optionally merge / remove the session worktree) yourself.
 
 Periodically (e.g., weekly, or after a batch of teammates' PRs land):
 
-6. Run `knowledge-drift` from the main checkout to find and fix stale docs.
+6. Run `knowledge-reconcile` from the main checkout to update stale docs against the current VS Code codebase.
 
 ---
 
@@ -212,12 +223,16 @@ Periodically (e.g., weekly, or after a batch of teammates' PRs land):
 
 **Why a VS Code agent plugin, not symlinks into the VS Code worktree:** An earlier design symlinked the knowledge repo into each VS Code worktree as `.knowledge/` so the agent could see it as part of the working tree. Shipping the skills as a plugin in this repo is simpler: the skills are namespaced under the plugin in VS Code, install in one step, and resolve the knowledge repo path from configuration. Nothing has to be added to (or excluded from) the VS Code worktree.
 
-**Why a worktree-per-session for the knowledge repo only when VS Code is in a worktree:** Concurrent agent sessions in VS Code worktrees can step on each other if they share a single knowledge checkout, so each gets its own knowledge worktree on a matching branch. When working in the main VS Code checkout there's no parallelism concern, so the agent operates on the knowledge repo's main checkout directly. `knowledge-finalize` does not need a worktree of its own — it just commits to the session's branch wherever that branch is checked out.
+**Why a worktree-and-branch per session for the knowledge repo:** Two concerns push toward isolation. (1) Concurrent sessions in different VS Code worktrees can both want to write docs/plans/changes; sharing a single knowledge checkout would mean stepping on each other's working tree state. (2) It's common to run the *same task* in parallel sessions — e.g., comparing different models on the same problem — and those sessions should not see each other's in-progress docs or plans, otherwise they influence each other. A branch + (when applicable) worktree per session gives each one a clean room. Since knowledge docs change infrequently and most sessions touch different docs, the merge cost at finalize time is low. `knowledge-finalize` does not need a worktree of its own beyond what `knowledge-init` already set up.
 
-**Why flat `docs/` instead of mirroring the VS Code repo's directory structure:** The VS Code repo is deep and complex. Mirroring it would create empty directories, hard-to-find files, and maintenance overhead. Flat files with descriptive names and cross-references in `index.md` are easier to browse and maintain. Docs reference the VS Code paths they cover, which is sufficient for navigation and drift detection.
+**Why mostly flat `docs/` instead of mirroring the VS Code repo's directory structure:** The VS Code repo is deep and complex. Mirroring it would create empty directories, hard-to-find files, and maintenance overhead, and it would also force each doc to live at one canonical location even though many docs cut across the tree (protocols, lifecycles, patterns). Flat files with descriptive names, declared `Covers:` paths, and cross-references in `index.md` are easier to browse and maintain. We're starting flat and will revisit if the file count grows past what's comfortable to skim.
 
 **Why `changes/` is separate from `docs/`:** Docs are mutable descriptions of the current state. Changes are an immutable log of what happened. They serve different purposes: docs answer "how does this work?" and changes answer "why is it this way?" and "what was tried?" Both are useful, and conflating them would make docs bloated with historical narrative.
 
-**Why drift detection is driven by the VS Code Git history, not by re-reading every doc:** The naive approach — read each doc, re-read every code reference, compare — is expensive and scales badly as the knowledge base grows. The Git history is the cheaper signal: if nothing in the VS Code repo has changed in the area a doc describes since that doc's baseline, the doc is presumed still accurate. Only docs whose subject area has churned need a deeper read. This makes drift checks fast enough to run routinely.
+**Why drift detection is driven by the VS Code Git history, not by re-reading every doc:** The naive approach — read each doc, re-read every code reference, compare — is expensive and scales badly as the knowledge base grows. The Git history is the cheaper signal: if nothing in the VS Code repo has changed in the area a doc describes since that doc's baseline, the doc is presumed still accurate. Only docs whose subject area has churned need a deeper read. This makes reconciliation cheap enough to run routinely.
+
+**Why `knowledge-reconcile` updates docs in place rather than producing a report:** A drift report that the user has to act on adds friction and tends to rot. The point of running reconciliation is to *end up with current docs*, not to know how stale things are. The skill writes the updates and leaves the user to review the diff and commit — same shape as `knowledge-finalize`.
+
+**Why `knowledge-finalize` doesn't commit:** Finalize writes a meaningful diff into the knowledge repo (doc updates, a new `changes/` entry, plan cleanup). Auto-committing it would mix agent-generated content into history without a review step, and bundling commit + merge + worktree-removal into the skill makes it both fragile and hard to undo. Leaving commit and any worktree cleanup to the user keeps the skill simple, makes the diff reviewable, and matches `knowledge-reconcile`'s shape.
 
 **Why changelog SHAs reference the working branch, not the merge commit:** Recording the merge-to-main SHA would require coming back to the knowledge repo after the PR merges, which adds friction and will be forgotten. The working branch SHA is good enough — it anchors the entry in time, gives drift detection a baseline to diff against, and can be correlated with a PR if needed. Precision isn't worth the workflow cost.
