@@ -1,8 +1,8 @@
 # Agent Host Sessions Providers
 
-_Covers: src/vs/sessions/contrib/localAgentHost/browser/localAgentHostSessionsProvider.ts, src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHostSessionsProvider.ts, src/vs/sessions/common/agentHostSessionsProvider.ts_
+_Covers: src/vs/sessions/contrib/agentHost/browser/baseAgentHostSessionsProvider.ts, src/vs/sessions/contrib/agentHost/browser/localAgentHostSessionsProvider.ts, src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHostSessionsProvider.ts, src/vs/sessions/common/agentHostSessionsProvider.ts_
 
-`LocalAgentHostSessionsProvider` and `RemoteAgentHostSessionsProvider` are the Sessions app's view of Agent Host sessions. Both implement `IAgentHostSessionsProvider` (defined in `src/vs/sessions/common/agentHostSessionsProvider.ts`), which extends `ISessionsProvider` with the Agent Host extras the Sessions UI needs: dynamic session config, optional remote connection status, and an output channel id. The local provider talks to `IAgentHostService` (utility-process MessagePort); the remote provider talks to an `IRemoteAgentHostConnection` over WebSocket / SSH / tunnel relay. Everything else about how a session is created, listed, subscribed to, and rendered is structurally the same between the two — they share helpers in `src/vs/sessions/common/agentHostSessionsProvider.ts` and `src/vs/sessions/common/sessionConfig.ts`, and they parallel each other line-by-line in places like `getSessionConfig`, `_handleConfigChanged`, and the lazy session-state subscription described below.
+`LocalAgentHostSessionsProvider` and `RemoteAgentHostSessionsProvider` are the Sessions app's view of Agent Host sessions. Both extend a shared abstract base, `BaseAgentHostSessionsProvider`, that owns ~all of the structural behaviour: the session cache, the three config caches, the lazy `ISessionState.config` subscription seeding, AHP notification/action handlers, `sendAndCreateChat`, and a single concrete `AgentHostSessionAdapter` (`ISession` implementation). The subclasses contribute only the bits that genuinely differ: which connection to use, how to label sessions, how to map session types ↔ resource schemes, how to pick a working folder, and (remote only) connection lifecycle. Both implement `IAgentHostSessionsProvider` (defined in `src/vs/sessions/common/agentHostSessionsProvider.ts`), which extends `ISessionsProvider` with the Agent Host extras the Sessions UI needs: dynamic session config, optional remote connection status, and an output channel id. The local provider talks to `IAgentHostService` (utility-process MessagePort); the remote provider talks to an `IRemoteAgentHostConnection` over WebSocket / SSH / tunnel relay.
 
 For where this layer sits in the broader topology, see [agent-host-topology](./agent-host-topology.md). For the AHP wire model these providers consume, see [agent-host-protocol](./agent-host-protocol.md). Turn execution and chat rendering happen elsewhere — see [agent-host-session-handler](./agent-host-session-handler.md).
 
@@ -17,6 +17,28 @@ For each provider:
 - **Bridge connection status.** Remote provider exposes `connectionStatus` and `remoteAddress`; local provider has neither.
 
 The providers do **not** own turn dispatch, file edits, terminals, permissions, or model selection — those are the [Session Handler](./agent-host-session-handler.md)'s job. The split is clean: **providers serve list and picker; handler runs turns**.
+
+## Base / subclass split
+
+`BaseAgentHostSessionsProvider` (in `agentHost/browser/baseAgentHostSessionsProvider.ts`) is `extends Disposable implements IAgentHostSessionsProvider`. It owns:
+
+- All shared maps and observables: `_sessionCache`, `_pendingSession`, `_currentNewSession*`, `_selectedModelId`, `_newSessionWorkspaces`, `_newSessionConfigs`, `_newSessionAgentProviders`, `_newSessionConfigRequests`, `_runningSessionConfigs`, `_sessionStateSubscriptions`, `_cacheInitialized`.
+- All emitters: `_onDidChangeSessions`, `_onDidReplaceSession`, `_onDidChangeSessionConfig`.
+- All connection-routed methods (`getSessions`, `getSessionConfig`, `setSessionConfigValue`, `archiveSession`, `sendRequest`, `sendAndCreateChat`, etc.) — they read the connection through `protected abstract get connection(): IAgentConnection | undefined` and skip dispatch (but still update local state) when undefined.
+- All AHP notification/action handlers (`_handleSessionAdded`, `_handleConfigChanged`, etc.), wired up through `_attachConnectionListeners(connection, store)`. Local calls this once in the constructor with `this._store`; remote calls it from `setConnection` with a per-connection store so connection replacement disposes everything.
+- A single concrete `AgentHostSessionAdapter` (one class, not subclassed) parameterised by an `IAgentHostAdapterOptions` bag: `{ icon, description, loading, buildWorkspace, mapDiffUri? }`.
+
+Subclass hooks the base calls (defaults are local behaviour, remote overrides as needed):
+
+- `protected abstract get connection()` — the live `IAgentConnection` or `undefined`.
+- `protected abstract get authenticationPending: IObservable<boolean>` — adapter captures this on construction; remote's is sticky (see below).
+- `protected abstract createAdapter(metadata): AgentHostSessionAdapter` — builds the adapter with subclass-specific icon/description/workspace.
+- `protected abstract resourceSchemeForSessionType(...)`, `agentProviderFromSessionType(...)` — session-id ↔ scheme mapping.
+- `protected abstract resolveWorkspace(...)` — what folder to open with a session.
+- `protected abstract id`, `label`, `icon`, `browseActions`.
+- Optional overrides: `mapWorkingDirectoryUri`, `mapProjectUri`, `_diffUriMapper`, `onConnectionLost`, `_validateBeforeCreate`, `_noAgentsErrorMessage`, `_notConnectedSendErrorMessage`.
+
+**`update()` returns `boolean`.** Both refresh paths (`_refreshSessions` and the handlers) check the return of `adapter.update(metadata)` and only fire `onDidChangeSessions` when something actually changed. This was previously inconsistent across providers.
 
 ## Dynamic session config: the three caches
 
@@ -56,17 +78,19 @@ This was a previous reviewer suggestion to filter to user-mutable subsets only; 
 
 ## Shared helpers
 
-`src/vs/sessions/common/agentHostSessionsProvider.ts` is the shared module both providers import from:
+`src/vs/sessions/common/agentHostSessionsProvider.ts` is the shared common module both providers (and the base) import from:
 
 - `IAgentHostSessionsProvider` — the extended `ISessionsProvider` interface.
 - `isAgentHostProvider(provider)` — type guard used by callers like `openInVSCode.contribution.ts`.
 - `resolvedConfigsEqual(a, b)` — shallow structural equality on `IResolveSessionConfigResult`. Compares value keys + values, then schema property keys. Schema property objects are compared by identity (they originate from the same protocol snapshot in the providers that use this helper).
+- `buildMutableConfigSchema(config)` — fallback schema-builder used by the (legacy) `_handleConfigChanged` path before lazy seeding hydrates.
+- `AUTO_APPROVE_ENUM` — shared enum used by both providers' picker config schemas.
 
-When adding logic that has to be identical between local and remote, prefer extending this module over duplicating in both providers.
+When adding logic that has to be identical between local and remote, prefer extending the abstract base in `agentHost/browser/baseAgentHostSessionsProvider.ts` over duplicating in both subclasses. Pure types/helpers with no DOM/workbench dependencies still go into `common/agentHostSessionsProvider.ts`.
 
 ## Tests
 
-- `src/vs/sessions/contrib/localAgentHost/test/browser/localAgentHostSessionsProvider.test.ts` and `src/vs/sessions/contrib/remoteAgentHost/test/browser/remoteAgentHostSessionsProvider.test.ts` exercise:
+- `src/vs/sessions/contrib/agentHost/test/browser/localAgentHostSessionsProvider.test.ts` and `src/vs/sessions/contrib/remoteAgentHost/test/browser/remoteAgentHostSessionsProvider.test.ts` exercise:
   - Listing, session add/remove, status mapping.
   - Lazy session-state subscription seeding (`SessionAdded` → `getSessionConfig` initially `undefined`, then populated after the fake state hydrates; structural-equality short-circuit; per-session subscription disposed on remove; remote case also asserts that replacing the connection disposes all per-session subscriptions).
 - `src/vs/platform/agentHost/test/node/agentService.test.ts` covers the persistence side (`createSession` writes values; `restoreSession` after dropping in-memory state restores them).
@@ -75,7 +99,9 @@ When adding logic that has to be identical between local and remote, prefer exte
 
 ## Where to edit
 
-- A change that should apply to both providers identically → extract to `src/vs/sessions/common/agentHostSessionsProvider.ts` (or `sessionConfig.ts`) and import.
+- A change that should apply to both providers identically → put it on `BaseAgentHostSessionsProvider` (or the shared adapter) in `agentHost/browser/baseAgentHostSessionsProvider.ts`. Pure types/helpers go into `common/agentHostSessionsProvider.ts`.
+- Local-only behaviour → `agentHost/browser/localAgentHostSessionsProvider.ts`.
+- Remote-only behaviour (connection lifecycle, sticky auth-pending, well-known agent type mapping, remote folder picker) → `remoteAgentHost/browser/remoteAgentHostSessionsProvider.ts`.
 - Picker UI behavior → `src/vs/sessions/contrib/chat/browser/agentHostSessionConfigPicker.ts`.
 - What gets persisted, when, and where the database lives → `src/vs/platform/agentHost/node/agentService.ts` (`createSession` / `restoreSession`) and `src/vs/platform/agentHost/node/agentSideEffects.ts` (`SessionConfigChanged`).
 - AHP wire shape (`ISessionState.config`, `ISessionConfigPropertySchema`) → see [agent-host-protocol](./agent-host-protocol.md).
@@ -89,9 +115,12 @@ When adding logic that has to be identical between local and remote, prefer exte
 ## Debt & gotchas
 
 - **gotcha** (2026-04-18, agentService.ts:createSession + agentSideEffects.ts:SessionConfigChanged) — we deliberately persist the **full resolved** `sessionConfig.values`, not only the user-mutable subset. Clients render the resolved config on restore and shouldn't have to re-resolve. The persisted values are read back as the source of truth for what the session was actually created with; they are *not* fed back into `resolveSessionConfig` as overrides on restore. Don't "clean this up" by filtering to `sessionMutable: true` — that loses information clients need.
-- **gotcha** (2026-04-18, localAgentHostSessionsProvider.ts:_ensureSessionStateSubscription + remote sibling) — the provider's session-state subscription is refcounted with the Session Handler's. Don't switch to a parallel raw `subscribe` to "keep the picker independent" — that would open a second wire subscription per session. Always go through `connection.getSubscription(...)` so the `IReference` refcount works.
-- **debt** (2026-04-18, localAgentHostSessionsProvider.ts:_handleConfigChanged + remote sibling) — `_handleConfigChanged` still has its old `buildMutableConfigSchema(config)` fallback path. Now that lazy seeding works, that branch will normally not fire before the subscription arrives. Worth revisiting whether it can be removed once we're confident no edge case still depends on it.
+- **gotcha** (2026-04-18, baseAgentHostSessionsProvider.ts:_ensureSessionStateSubscription) — the provider's session-state subscription is refcounted with the Session Handler's. Don't switch to a parallel raw `subscribe` to "keep the picker independent" — that would open a second wire subscription per session. Always go through `connection.getSubscription(...)` so the `IReference` refcount works.
+- **gotcha** (2026-04-19, baseAgentHostSessionsProvider.ts:createNewSession) — the draft-state reset block clears **all five** of `_currentNewSession`, `_currentNewSessionStatus`, `_currentNewSessionModelId`, `_currentNewSessionLoading`, `_selectedModelId` together. They're a single conceptual "current draft" tuple; if you add another `_currentNewSession*` field, add it here too. Missing one leaves a half-cleared draft if the function throws before `_createNewSessionForType` runs (e.g. unknown `sessionType`). Caught in code review on PR #311261.
+- **gotcha** (2026-04-19, src/vs/sessions/contrib/agentHost/, build/lib/i18n.resources.json) — code under `src/vs/sessions/~` (i.e. `browser/`, `common/`, `node/` directly under `sessions/`) **cannot import from `src/vs/workbench/contrib/*`**. Only code under `src/vs/sessions/contrib/<feature>/~` can. This is enforced by `code-import-patterns` in `eslint.config.js`. The shared `BaseAgentHostSessionsProvider` lives in `sessions/contrib/agentHost/browser/` for exactly this reason — workbench-contrib helpers it depends on are not reachable from `sessions/browser/` or `sessions/common/`. When adding a new contrib folder under `src/vs/sessions/contrib/`, **also add it to `build/lib/i18n.resources.json`** or the hygiene check (`npm run precommit`) fails.
+- **debt** (2026-04-18, baseAgentHostSessionsProvider.ts:_handleConfigChanged) — `_handleConfigChanged` still has its old `buildMutableConfigSchema(config)` fallback path. Now that lazy seeding works, that branch will normally not fire before the subscription arrives. Worth revisiting whether it can be removed once we're confident no edge case still depends on it.
 
 ## Changelog
 
+- **2026-04-19** — `29c89294e9` — extracted `BaseAgentHostSessionsProvider` and `AgentHostSessionAdapter` to `src/vs/sessions/contrib/agentHost/browser/baseAgentHostSessionsProvider.ts`. Local provider went from full implementation to ~186 LOC subclass; remote went from 1457 LOC to 395 LOC. Local provider also moved into the same `agentHost` contrib folder as the new base (was its own `localAgentHost` contrib). Net ~880 LOC removed. Added gotchas for the layer-rule restriction on `vs/sessions/~` vs `vs/sessions/contrib/*/~`, the `i18n.resources.json` registration requirement, and the `_currentNewSession*` reset tuple. Old `localAgentHostSessionsProvider.ts:` debt/gotcha entries re-anchored to `baseAgentHostSessionsProvider.ts:`.
 - **2026-04-18** — `96ab46a042` — initial entry. Captures both Agent Host sessions providers (local + remote), the three-cache config picker model, lazy session-state subscription seeding, the persistence/restore bridge through `AgentService` + `AgentSideEffects`, and the shared `resolvedConfigsEqual` helper. Records the deliberate "persist full resolved values" decision and the refcounted-subscription gotcha.
