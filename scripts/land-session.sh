@@ -71,7 +71,7 @@ git -C "$WT" rev-parse --verify origin/main >/dev/null 2>&1 && HAVE_ORIGIN=1
 
 # --- Find this session's summary --------------------------------------------
 session_paths() {
-    git -C "$WT" status --porcelain | awk '{print $NF}'
+    git -C "$WT" status --porcelain -uall | awk '{print $NF}'
     if [[ "$HAVE_ORIGIN" -eq 1 ]]; then
         git -C "$WT" diff --name-only origin/main..HEAD 2>/dev/null
     fi

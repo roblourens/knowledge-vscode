@@ -11,7 +11,7 @@ The trick: don't re-read every doc against every code reference. Use the VS Code
 
 ## Precondition
 
-Knowledge repo must be set up. If `$VSCODE_REPO/.knowledge` doesn't exist as a symlink, or doesn't resolve, run `init` first.
+Knowledge repo must be set up. If `$VSCODE_REPO/.knowledge` doesn't exist as a symlink, or doesn't resolve, run the `init` skill automatically — do **not** ask the user. Then proceed with reconcile.
 
 Re-derive what you need each time:
 
@@ -65,13 +65,7 @@ For each doc that needs changes (from steps 3 or 4):
 - Update `Covers:` if the relevant paths shifted.
 - Update or remove inline references to deleted/renamed/moved symbols.
 - Revisit the `## Debt & gotchas` section (see step 5a).
-- Append a new changelog entry:
-
-  ```markdown
-  - **YYYY-MM-DD** — <origin/main HEAD short SHA, via `git -C "$VSCODE_REPO" rev-parse --short=10 origin/main`> — reconciliation: <one-line summary of what was updated>
-  ```
-
-  The new SHA becomes the new baseline for next time.
+- Append a new changelog entry (see step 5b).
 
 If a doc has been *substantially* invalidated (the component it describes has been split, merged, or deleted), do not silently rewrite it — surface it to the user and ask whether to rewrite, split, or delete the doc.
 
@@ -84,6 +78,20 @@ For docs whose code area changed since baseline, re-evaluate the existing `## De
 - Don't *add* new `debt`/`gotcha` entries during reconcile unless the code change you're documenting itself introduced the debt (e.g., a partial migration left two parallel code paths). Net-new debt and gotchas are `finalize`'s territory — they come out of doing the work, not auditing it.
 
 If the cross-cutting `## Active debt & gotchas` section in `index.md` references a doc whose entry you removed, also remove (or rephrase) the index pointer.
+
+### 5b. Always bump baselines
+
+Bump the changelog baseline on every doc whose covered area saw any commits since its last baseline — **including docs where the change turned out not to invalidate any prose**. This is what makes the next reconcile cheap: the same range of commits won't be re-examined.
+
+For each such doc, append:
+
+```markdown
+- **YYYY-MM-DD** — <origin/main HEAD short SHA, via `git -C "$VSCODE_REPO" rev-parse --short=10 origin/main`> — reconciliation: <one-line summary of what changed in code and what (if anything) was updated in the doc>
+```
+
+Use phrasing like "no doc changes — <commit description> didn't affect the architectural concepts this doc covers" for no-op reconciliations, so the changelog explains why the SHA was bumped without a body edit.
+
+Do **not** ask the user before bumping baselines for no-op reconciliations — it's the default behavior. The new SHA becomes the new baseline for next time.
 
 ### 6. Report
 
