@@ -63,6 +63,19 @@ If a behavior could be expressed as a protocol action and reducer change, prefer
 - **Preserve the `IAgentConnection` abstraction.** Reach for `IAgentHostService` only when you need a local-lifecycle API (restart, etc.).
 - **Customization refs flow through the protocol.** Don't piggyback on workbench-side state to communicate customization changes to the server; use `ISessionActiveClient` and customization actions.
 
+## Remote file links in tool messages
+
+`stateToProgressAdapter.ts` rewrites markdown links inside tool `invocationMessage` / `pastTenseMessage` (and other markdown-typed `StringOrMarkdown` fields) so that `file://` links coming back from a **remote** agent host are wrapped through `toAgentHostUri(connectionAuthority, ...)` into the `vscode-agent-host://<authority>/<scheme>/<authority|->/<path>` form (`AGENT_HOST_SCHEME` from `src/vs/platform/agentHost/common/agentHostUri.ts`). This is what lets the workbench resolve those URIs against the right Agent Host filesystem on click.
+
+The rewrite **deliberately empties the link text** (`[label](url)` → `[](newUrl)`). Empty-text `<a>` tags are picked up by `renderFileWidgets` in `chatInlineAnchorWidget.ts` and replaced with `InlineAnchorWidget` (the rich file chip). Preserving the original label would suppress that conversion.
+
+Two coupling points to know about:
+
+1. **The sanitizer must allow the scheme.** `ChatContentMarkdownRenderer` augments the markdown sanitizer's `allowedLinkSchemes` with `AGENT_HOST_SCHEME`. Without that, DOMPurify strips the disallowed `href` *before* `rewriteRenderedLinks` runs, then `rewriteRenderedLinks` sees an `<a>` with no `href` and no text and removes the element entirely — `renderFileWidgets` then has nothing to convert and the message renders as bare "Read " (or just the prefix text, with nothing where the link should be).
+2. **The Copilot tool-display side must produce a markdown link with a label** (`[basename](file:///path)`, via `formatPathAsMarkdownLink` in `copilotToolDisplay.ts`). The rewrite is what turns that into the empty-text agent-host form; if the producer ships an empty-text link to begin with, the marked tokeniser may not produce an `<a>` at all.
+
+If you introduce another markdown-typed channel that may carry remote file links (e.g. a new `StringOrMarkdown` field on a state component), route it through `rewriteMarkdownLinks` / `stringOrMarkdownToString` *and* make sure whichever renderer it ends up in also augments `allowedLinkSchemes` with `AGENT_HOST_SCHEME`.
+
 ## Where to edit
 
 - Turn rendering, progress, history, cancellation, server-initiated turns, permissions, customization refs → `agentHostSessionHandler.ts`.
@@ -87,10 +100,11 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 
 ## Debt & gotchas
 
-_(Empty for now. Entries take the form `- **debt|gotcha** (YYYY-MM-DD, file:symbol) — description`.)_
+- **gotcha** (2026-04-19, stateToProgressAdapter.ts:rewriteMarkdownLinks + chatContentMarkdownRenderer.ts) — the remote-file link rewrite produces empty-text `<a href="vscode-agent-host://...">` tags on purpose so `renderFileWidgets` can replace them with `InlineAnchorWidget`. This works only if the chat markdown sanitizer augments `allowedLinkSchemes` with `AGENT_HOST_SCHEME`. Drop the scheme from the allowlist (or change the rewrite to keep link text) and the link silently disappears: DOMPurify strips the `href`, `rewriteRenderedLinks` removes the empty `<a>`, and the message renders as bare prefix text. If you add another markdown-typed channel that may carry remote file links, you have to update both sides — see "Remote file links in tool messages" above.
 
 ## Changelog
 
 - **2026-04-16** — `6cd94ddc6f` — initial entry. Captures the role of `AgentHostSessionHandler` as the shared local/remote adapter between AHP session state and VS Code chat sessions, including turn dispatch, progress rendering, active-turn reconnect, server-initiated turns, permissions, client tools, file edits, terminals, subagents, auth retries, and customization refs. Drawn from the prior `agent-host-chat-sessions` skill.
 - **2026-04-16** — `6cd94ddc6f` — added `IAgentHostSessionHandlerConfig` example showing the local-vs-remote seam, and cross-referenced the new topology doc.
 - **2026-04-18** — `96ab46a042` — cross-linked to the new agent-host-sessions-providers doc; clarified that the providers share the same refcounted `StateComponents.Session` subscriptions.
+- **2026-04-19** — `b708764819` — added a "Remote file links in tool messages" section covering `rewriteMarkdownLinks` in `stateToProgressAdapter.ts`, the deliberate empty-text rewrite, and its dependency on `ChatContentMarkdownRenderer` augmenting `allowedLinkSchemes` with `AGENT_HOST_SCHEME`; added a gotcha capturing the silent-failure mode if the two sides drift.
