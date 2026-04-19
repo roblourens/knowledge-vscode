@@ -55,3 +55,17 @@ If during implementation you discover that a knowledge doc is wrong or incomplet
 ### 4. Stop at "implementation complete"
 
 This skill does not commit, push, or finalize. When the user is satisfied with the implementation, they (or the agent at their direction) run `finalize` to roll learnings back into the knowledge repo.
+
+## Privacy: don't leak the knowledge repo into source
+
+The knowledge repo is **private to the user**. Other contributors to the VS Code repo do not have access to it.
+
+When writing code, comments, commit messages, PR descriptions, or any other artifact that lands in the public VS Code repo, **never reference**:
+
+- The knowledge repo by name or path (e.g. `knowledge-vscode`, `.knowledge`, `$KNOWLEDGE_CHECKOUT`).
+- Any doc inside it (e.g. `docs/agent-host-topology.md`, `docs/agent-host-sessions-providers.md`).
+- Concepts whose only home is the knowledge repo (e.g. "agent-host topology", "well-known property names" as a knowledge-repo doc heading) phrased in a way that implies a doc the reader can look up.
+
+Instead, inline whatever context the source code needs. If you'd otherwise want to write *"see docs/X.md for the broader story"*, replace it with a self-contained explanation in the code.
+
+This applies the same way to `plan` and `finalize` outputs that land in the public repo (e.g. PR descriptions written from `tasks.md`). Files inside the knowledge repo itself (`plan/<session>/plan.md`, `tasks.md`, `docs/*.md`, `changes/*.md`) are private and may freely cross-reference each other.
