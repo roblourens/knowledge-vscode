@@ -141,7 +141,15 @@ fi
 
 # --- Symlink + .git/info/exclude --------------------------------------------
 ln -s "$KNOWLEDGE_WORKTREE" "$LINK"
-EXCLUDE="$VSCODE_REPO/.git/info/exclude"
+# Use --git-common-dir so this works when VSCODE_REPO is itself a worktree
+# (in which case $VSCODE_REPO/.git is a file pointing to the real gitdir,
+# not a directory — but info/exclude lives in the shared common dir anyway).
+GIT_COMMON_DIR="$(git -C "$VSCODE_REPO" rev-parse --git-common-dir)"
+case "$GIT_COMMON_DIR" in
+    /*) ;;
+    *) GIT_COMMON_DIR="$VSCODE_REPO/$GIT_COMMON_DIR" ;;
+esac
+EXCLUDE="$GIT_COMMON_DIR/info/exclude"
 [[ -f "$EXCLUDE" ]] || { mkdir -p "$(dirname "$EXCLUDE")"; : > "$EXCLUDE"; }
 grep -qxF '.knowledge' "$EXCLUDE" || echo '.knowledge' >> "$EXCLUDE"
 
