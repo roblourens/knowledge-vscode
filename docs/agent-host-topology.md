@@ -147,9 +147,10 @@ If you can't place a piece of code in exactly one of these buckets, that's the m
 
 ## Debt & gotchas
 
-_(Empty for now. Entries take the form `- **debt|gotcha** (YYYY-MM-DD, file:symbol) — description`.)_
+- **gotcha** (2026-04-19, agentHostMain.ts / agentHostServerMain.ts) — the agent-host child process registers ONLY `INativeEnvironmentService`, not `IEnvironmentService` (the base token). All consumers in the child process use the native token. The parent-process starter (`nodeAgentHostStarter.ts`) runs in the main Electron process's DI container and does use `IEnvironmentService`, but that's a different container — don't confuse the two. Other VS Code processes may register both tokens; the agent host is native-only.
 
 ## Changelog
 
 - **2026-04-16** — `6cd94ddc6f` — initial entry. Captures the AHP generic-protocol philosophy (neither client nor server is "VS Code"), the two sanctioned convention exceptions (well-known config property names; tool-call kinds + metadata), the two-app topology (VS Code app vs Agents app — the latter still rooted at `src/vs/sessions/`), the three deployment configurations (VS Code + local; Agents + local; Agents + remote × N), the `IAgentConnection` / `AgentHostSessionHandler` shared seam with `connectionAuthority` and `sessionType` as the only per-configuration variations, and the where-to-put-new-code decision tree.
 - **2026-04-17** — `9364e338cc` — clarified that SDK-backed providers own session filtering/adoption boundaries before generic aggregation or UI listing.
+- **2026-04-19** — `bea3e7e018` — added gotcha: agent-host child process registers only `INativeEnvironmentService`, not the base `IEnvironmentService` token.
