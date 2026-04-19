@@ -76,6 +76,17 @@ Two coupling points to know about:
 
 If you introduce another markdown-typed channel that may carry remote file links (e.g. a new `StringOrMarkdown` field on a state component), route it through `rewriteMarkdownLinks` / `stringOrMarkdownToString` *and* make sure whichever renderer it ends up in also augments `allowedLinkSchemes` with `AGENT_HOST_SCHEME`.
 
+## Subagent rendering
+
+The subagent flow has a few non-obvious orderings between events that arrive on the parent's stream and events that belong to a child session. The bookkeeping lives in `agentSideEffects.ts` (event routing) and `chatSubagentContentPart.ts` (UI updates).
+
+- **Inner `tool_start` may arrive before `subagent_started`.** When the parent emits the wrapping `task` tool start, the SDK can immediately emit inner tool starts for the child session before the corresponding `subagent_started` action has created the child session in state. These events are buffered in `_pendingSubagentEvents` keyed by the parent tool call id, then drained onto the new session as soon as `subagent_started` lands.
+- **`_toolCallAgents` registration must be deferred for inner tool starts.** A `tool_start` carrying a `parentToolCallId` is *for the child session*, but the later `tool_ready` does not carry `parentToolCallId`. If you register the inner tool against the parent in `_toolCallAgents` at start time, `tool_ready` will route the result to the wrong session. Defer registration until drain.
+- **Parent may complete without ever emitting `subagent_started`.** If the SDK errors out or the child never starts, `completeSubagentSession` must clear `_pendingSubagentEvents` for that parent tool call id — otherwise the buffer grows unbounded across turns.
+- **`subagent_started` arrives after the description is set.** The wrapping tool's `description` is set at `tool_start` time; the agent name only arrives via `subagent_started` later. The `chatSubagentContentPart.ts` autorun must update `description` and `agentName` *independently*, each gated on whether the field actually changed. Gating both updates on a single `_isDefaultDescription` flag (or similar) silently drops the late `agentName` and the UI falls back to the generic "subAgent" label.
+- **SDK-specific arg shapes belong in the per-SDK adapter.** The Copilot SDK's `task` tool destructures `agent_type` (snake_case) — that parsing lives in `copilot/copilotToolDisplay.ts::getSubagentMetadata`, not in the generic `agentEventMapper.ts`. The mapper only forwards normalized `subagentAgentName` and `subagentDescription` event fields. See [copilot-agent-provider](./copilot-agent-provider.md).
+- **Auto-approval covers tool calls inside subagent sessions.** Tools that should auto-approve in the parent (workspace reads, etc.) must also auto-approve when run by the child. Verify with the protocol integration test that exercises the `subagent` prompt.
+
 ## Where to edit
 
 - Turn rendering, progress, history, cancellation, server-initiated turns, permissions, customization refs → `agentHostSessionHandler.ts`.
@@ -86,9 +97,13 @@ If you introduce another markdown-typed channel that may carry remote file links
 
 ## Tests
 
+See [testing](./testing.md) for the four test layers and when to use each. Tests directly relevant to this handler:
+
 - `src/vs/workbench/contrib/chat/test/browser/agentSessions/agentHostChatContribution.test.ts` — dynamic registration, session id mapping, create/subscribe, progress rendering, cancellation, errors, permission requests, history, tool rendering, attachments, dynamic discovery, config forwarding, **active-turn reconnect**, server-initiated turns, customizations.
 - `agentHostClientTools.test.ts` — tool definition/result conversion, allowlist filtering, active-client tool updates.
 - `src/vs/workbench/contrib/chat/test/browser/agentHost/agentHostEditingSession.test.ts` — file edit hydration, undo/redo, snapshots, checkpoint disablement.
+- `src/vs/workbench/contrib/chat/test/browser/widget/chatContentParts/chatSubagentContentPart.test.ts` — late metadata updates (description→agent name ordering), lazy expand, current-running-tool title.
+- `src/vs/platform/agentHost/test/node/agentSideEffects.test.ts` — subagent event buffering, `_pendingSubagentEvents` cleanup when parent completes without `subagent_started`.
 
 When changing the handler, run the workbench adapter tests *and* the protocol/server tests for the underlying behavior — the handler often surfaces server-side bugs.
 
@@ -101,6 +116,9 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 ## Debt & gotchas
 
 - **gotcha** (2026-04-19, stateToProgressAdapter.ts:rewriteMarkdownLinks + chatContentMarkdownRenderer.ts) — the remote-file link rewrite produces empty-text `<a href="vscode-agent-host://...">` tags on purpose so `renderFileWidgets` can replace them with `InlineAnchorWidget`. This works only if the chat markdown sanitizer augments `allowedLinkSchemes` with `AGENT_HOST_SCHEME`. Drop the scheme from the allowlist (or change the rewrite to keep link text) and the link silently disappears: DOMPurify strips the `href`, `rewriteRenderedLinks` removes the empty `<a>`, and the message renders as bare prefix text. If you add another markdown-typed channel that may carry remote file links, you have to update both sides — see "Remote file links in tool messages" above.
+- **gotcha** (2026-04-19, agentSideEffects.ts:_pendingSubagentEvents) — Inner subagent `tool_start` can arrive before `subagent_started`. Buffer keyed by parent tool call id; clear on both drain *and* `completeSubagentSession` (parent may complete without ever starting the child).
+- **gotcha** (2026-04-19, agentSideEffects.ts:_toolCallAgents) — Don't register inner tool starts (those carrying `parentToolCallId`) in `_toolCallAgents` until drain. The matching `tool_ready` lacks `parentToolCallId` and would route to the wrong session.
+- **gotcha** (2026-04-19, chatSubagentContentPart.ts) — Update `description` and `agentName` independently in the autorun. Gating both on a single flag drops the late agent name and the UI falls back to "subAgent".
 
 ## Changelog
 
@@ -108,3 +126,4 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 - **2026-04-16** — `6cd94ddc6f` — added `IAgentHostSessionHandlerConfig` example showing the local-vs-remote seam, and cross-referenced the new topology doc.
 - **2026-04-18** — `96ab46a042` — cross-linked to the new agent-host-sessions-providers doc; clarified that the providers share the same refcounted `StateComponents.Session` subscriptions.
 - **2026-04-19** — `b708764819` — added a "Remote file links in tool messages" section covering `rewriteMarkdownLinks` in `stateToProgressAdapter.ts`, the deliberate empty-text rewrite, and its dependency on `ChatContentMarkdownRenderer` augmenting `allowedLinkSchemes` with `AGENT_HOST_SCHEME`; added a gotcha capturing the silent-failure mode if the two sides drift.
+- **2026-04-19** — `2935e7d695` — added "Subagent rendering" section covering buffering, deferred `_toolCallAgents` registration, independent `description`/`agentName` updates in `chatSubagentContentPart.ts`, and parent-without-child cleanup. Cross-linked the new testing doc and added subagent-related test references.
