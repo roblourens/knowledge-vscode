@@ -24,11 +24,6 @@ vscode-knowledge/
 │   ├── state-sync-protocol.md
 │   ├── chat-participants.md
 │   └── ...
-├── tasks/
-│   ├── updating-the-protocol.md
-│   ├── test-strategies.md
-│   ├── interactive-verification.md
-│   └── ...
 ├── changes/
 │   ├── 2026-04-15-session-reconnect/
 │   │   └── summary.md
@@ -46,7 +41,7 @@ vscode-knowledge/
 
 The top-level entry point. Provides general context about the agent host subsystem: what it is, where it lives in the VS Code codebase, the major architectural layers, and a brief description of each doc and task file with links. An agent starting a session should read this file first to orient itself.
 
-**Retrieval:** For now, retrieval is intentionally simple — `index.md` plus keyword/search through `docs/` and `tasks/` is the whole story. Each doc and task entry in `index.md` should include a one-line description rich enough that keyword search finds it, plus a `Covers:` listing of the VS Code paths it concerns. If the knowledge base grows large enough that this stops being enough, we can add tags, embeddings, or a smarter retrieval skill later.
+**Retrieval:** For now, retrieval is intentionally simple — `index.md` plus keyword/search through `docs/` is the whole story. Each doc entry in `index.md` should include a one-line description rich enough that keyword search finds it, plus a `Covers:` listing of the VS Code paths it concerns. If the knowledge base grows large enough that this stops being enough, we can add tags, embeddings, or a smarter retrieval skill later.
 
 ### `docs/`
 
@@ -81,17 +76,7 @@ Each doc:
 
 The changelog SHAs reference whatever commit was HEAD on the working branch at the time the entry was written. These don't need to be updated later when the PR merges to main — they serve as approximate anchors for "around when did this understanding change" and as the baseline `reconcile` diffs against, not as precise audit markers.
 
-Docs describe how things *are* and *why*, not how they *should be*. They are descriptive, not prescriptive. This makes them more durable than formal specs — rationale and architecture descriptions change less frequently than behavioral requirements.
-
-### `tasks/`
-
-Reusable guidance for recurring work patterns. These are reference docs, not executable scripts. They cover things like:
-
-- How to make changes that span the agent protocol repo and the VS Code repo (coordination workflow, which repo to change first, how to test across boundaries).
-- What types of tests are available (unit, integration, smoke, etc.), when to add each kind, and where they live.
-- How to verify agent host functionality interactively (what to launch, how to connect, what to look for).
-
-These are indexed in `index.md` alongside the component docs. They differ from docs in that they describe *how to do work* rather than *how things work*. An agent can reference them during planning and implementation.
+Docs describe how things *are* and *why*, not how they *should be*. They are descriptive, not prescriptive. This makes them more durable than formal specs — rationale and architecture descriptions change less frequently than behavioral requirements. That said, prescriptive how-to-work-with-this-component notes belong in the relevant doc itself — there's no separate task-guide layer.
 
 ### `changes/`
 
@@ -144,7 +129,7 @@ The skills locate the knowledge repo from a user-managed VS Code setting. The se
 1. Read `index.md` and any `docs/` whose `Covers:` overlaps with the question.
 2. Read the relevant source — docs are a starting point, not a substitute for the code.
 3. Answer concretely, citing specific functions, types, and source files. If iterating on an idea, surface trade-offs and prior art in the codebase.
-4. Write nothing — no `plan/`, `tasks/`, `docs/`, or `changes/` updates, and no code in `$VSCODE_REPO`. If the conversation produces an idea worth keeping, suggest moving to `plan` or `implement`.
+4. Write nothing — no `plan/`, `docs/`, or `changes/` updates, and no code in `$VSCODE_REPO`. If the conversation produces an idea worth keeping, suggest moving to `plan` or `implement`.
 
 ### `plan`
 
@@ -155,9 +140,9 @@ The skills locate the knowledge repo from a user-managed VS Code setting. The se
 **Behavior:**
 
 1. Read `index.md` to orient.
-2. Based on the user's prompt or the current task context, identify which docs and task guides are relevant. Read them.
+2. Based on the user's prompt or the current task context, identify which docs are relevant. Read them.
 3. Produce a plan in a new session subfolder under the knowledge repo's `plan/` directory, named `YYYY-MM-DD-short-description/`:
-   - `plan.md` — the approach, referencing relevant knowledge docs and task guides.
+   - `plan.md` — the approach, referencing relevant knowledge docs.
    - `tasks.md` — ordered task list with dependencies.
 4. If the plan would change behavior described in existing docs, note which docs will need updating and what the expected changes are. Don't edit the docs yet — that happens at finalize.
 5. Present the plan to the user for review.
@@ -172,7 +157,7 @@ The skills locate the knowledge repo from a user-managed VS Code setting. The se
 
 1. If a plan exists for this session under the knowledge repo's `plan/` directory, read it and work through the tasks.
 2. If no plan exists, work from the user's prompt directly, but still read relevant knowledge docs for context before starting.
-3. Reference task guides (e.g., test strategies, interactive verification) as appropriate during implementation.
+3. Reference relevant docs (including any prescriptive "how to work with this" notes inside them) as appropriate during implementation.
 4. Implement in the VS Code worktree as normal — edit files, run tests, iterate.
 
 This skill is deliberately lightweight. It's the normal agent coding workflow, augmented by reading knowledge context first.
@@ -245,7 +230,7 @@ A typical session:
 1. Create a VS Code worktree for a feature branch (or work in the main checkout).
 2. Start a chat session and ask the agent to plan or implement. The agent runs `init` automatically on first use — setting up a knowledge worktree on a matching branch.
 3. The agent uses `plan` for larger work, or jumps straight to `implement` for smaller changes.
-4. Do the work. Agent reads relevant docs and task guides as needed.
+4. Do the work. Agent reads relevant docs as needed.
 5. Run `finalize` to capture what was learned as on-disk changes in the knowledge repo. Review the diff. Once you're happy, run `land` to commit, fast-forward-merge into `main`, push to `origin`, and tear down the session worktree.
 
 Periodically (e.g., weekly, or after a batch of teammates' PRs land):

@@ -17,10 +17,9 @@ Show the user the sections below. Keep the explanation concise — they can read
 
 A personal knowledge base for the VS Code agent host subsystem. It lives in a separate Git repo (this plugin's repo) and is exposed inside the VS Code workspace as a `.knowledge/` symlink so files are easy to read and edit alongside the code.
 
-The knowledge base has four kinds of content:
+The knowledge base has three kinds of content:
 
-- **`docs/`** — descriptive docs about how a component works. One component per doc, with a `Covers:` line listing the VS Code paths the doc concerns. Each doc has a changelog with SHA baselines used to detect drift.
-- **`tasks/`** — reusable how-to guides for recurring work patterns (test strategies, protocol updates, interactive verification).
+- **`docs/`** — descriptive docs about how a component works. One component per doc, with a `Covers:` line listing the VS Code paths the doc concerns. Each doc has a `## Debt & gotchas` section and a changelog with SHA baselines used to detect drift. Prescriptive how-to-work-with-this-component notes belong in the relevant doc itself — there's no separate task-guide layer.
 - **`changes/`** — append-only history of completed work, one folder per session.
 - **`plan/`** — ephemeral planning artifacts for the current session, cleaned up at finalize.
 
@@ -53,7 +52,7 @@ Periodically: `reconcile` brings stale docs back in sync with `origin/main`.
 
 ### Where to look
 
-- `.knowledge/index.md` — top-level orientation, list of all docs and tasks, conventions.
+- `.knowledge/index.md` — top-level orientation, list of all docs, conventions.
 - `.knowledge/docs/` — component docs with `Covers:` lines and changelogs.
 - `.knowledge/changes/` — narrative history.
 - The plugin's own `readme.md` — full design rationale.

@@ -39,7 +39,7 @@ This keeps the system stateless from the agent's perspective and avoids the agen
 
 ## Orienting
 
-Read `$KNOWLEDGE_CHECKOUT/index.md` for context on what's in the knowledge base. That's it — you'll pull in specific docs and task guides as the work demands.
+Read `$KNOWLEDGE_CHECKOUT/index.md` for context on what's in the knowledge base. That's it — you'll pull in specific docs as the work demands.
 
 ## Output
 

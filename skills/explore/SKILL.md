@@ -30,7 +30,6 @@ Re-derive what you need each time:
 
 - Read `$KNOWLEDGE_CHECKOUT/index.md`, including the `## Active debt & gotchas` section if there's anything there relevant to the question.
 - Read every doc under `docs/` whose `Covers:` line overlaps with the user's question. Always read the doc's `## Debt & gotchas` section — it captures load-bearing weirdness and known issues that often answer the user's question directly or change which approach is viable.
-- If a relevant task guide exists under `tasks/`, read it.
 - Skim the most recent two or three `changes/` entries that touch the same subsystem if they look pertinent.
 
 If no docs apply, say so — the user is asking about an undocumented area, and the answer will lean entirely on the source.
@@ -49,4 +48,4 @@ For broad questions that span independent areas (protocol + workbench, local + r
 
 ### 4. Don't write artifacts
 
-This skill writes nothing under `$KNOWLEDGE_CHECKOUT/` — no `plan/`, `tasks/`, `docs/`, or `changes/` updates. It also writes no code in `$VSCODE_REPO`. If the conversation produces an idea worth keeping, suggest moving to `plan` (which will create the session folder) or `implement` (which will create an empty session folder and start coding).
+This skill writes nothing under `$KNOWLEDGE_CHECKOUT/` — no `plan/`, `docs/`, or `changes/` updates. It also writes no code in `$VSCODE_REPO`. If the conversation produces an idea worth keeping, suggest moving to `plan` (which will create the session folder) or `implement` (which will create an empty session folder and start coding).

@@ -1,6 +1,6 @@
 # Agent Host Knowledge Index
 
-The entry point for the VS Code agent host knowledge base. Read this file first to orient, then pull the specific docs and task guides relevant to your task.
+The entry point for the VS Code agent host knowledge base. Read this file first to orient, then pull the specific docs relevant to your task.
 
 ## What this knowledge base covers
 
@@ -32,10 +32,6 @@ Read in this order if you're new — each one assumes the previous.
 - [agent-host-sessions-providers](docs/agent-host-sessions-providers.md) — local and remote Agent Host sessions providers for the Sessions app: list/open, dynamic session-config picker, lazy `ISessionState.config` subscription seeding, and the persistence/restore bridge through `AgentService` + `AgentSideEffects`. _Covers: src/vs/sessions/contrib/localAgentHost/browser/localAgentHostSessionsProvider.ts, src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHostSessionsProvider.ts, src/vs/sessions/common/agentHostSessionsProvider.ts_
 
 _(More docs to come. As they're added, list them here with a one-line keyword-rich description plus a `Covers:` line.)_
-
-## Tasks
-
-_(Task guides — reusable how-to references for recurring work patterns — go here as they're written. Examples to come: `updating-the-protocol`, `test-strategies`, `interactive-verification`.)_
 
 ## Active debt & gotchas
 

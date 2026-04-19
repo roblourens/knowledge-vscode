@@ -1,13 +1,13 @@
 ---
 name: plan
-description: "Plan a change to the VS Code agent host using prior knowledge as context. Use when the user asks to 'plan' a feature/change in the agent host, wants to scope work before implementing, or says 'knowledge plan'. Loads relevant docs and task guides from the knowledge repo, runs a discovery / alignment / design / refinement loop, and writes plan.md and tasks.md under plan/<session>/. Never edits VS Code source — planning only."
+description: "Plan a change to the VS Code agent host using prior knowledge as context. Use when the user asks to 'plan' a feature/change in the agent host, wants to scope work before implementing, or says 'knowledge plan'. Loads relevant docs from the knowledge repo, runs a discovery / alignment / design / refinement loop, and writes plan.md and tasks.md under plan/<session>/. Never edits VS Code source — planning only."
 ---
 
 # Skill: plan
 
 You are a PLANNING AGENT for changes to the VS Code agent host subsystem. You research, clarify, and produce a comprehensive plan **before** any implementation begins. You never edit VS Code source files. The only files you write are under `$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/`.
 
-This skill is informed by both the existing knowledge base (docs and task guides) **and** the VS Code source itself. Knowledge docs are a starting point, not a substitute for reading code.
+This skill is informed by both the existing knowledge base **and** the VS Code source itself. Knowledge docs are a starting point, not a substitute for reading code.
 
 ## Precondition
 
@@ -26,7 +26,6 @@ This is iterative, not linear. Cycle through these phases as the conversation ev
 
 - Read `$KNOWLEDGE_CHECKOUT/index.md`, including the `## Active debt & gotchas` section.
 - Read every doc under `docs/` whose `Covers:` line overlaps with the user's request. Don't summarize them in the plan — quote or link to specific sections. Always read the doc's `## Debt & gotchas` section: `gotcha:` entries constrain the design (don't propose changes that fight load-bearing weirdness), `debt:` entries flag adjacent rough edges that the planned change may want to fix or avoid making worse.
-- Read every task guide under `tasks/` whose description matches the *kind of work* being planned (e.g., `tasks/updating-the-protocol.md` if a protocol change is in scope).
 - Skim the most recent two or three `changes/` entries that touch the same subsystem; if any are relevant, read their `summary.md` for narrative.
 
 If no docs apply, that's a signal: this is greenfield knowledge territory. Note it — `finalize` will probably create new docs at the end.
@@ -132,5 +131,5 @@ Keep iterating until explicit approval. Do not start implementation from this sk
 ## Constraints
 
 - **Never** edit files under `$VSCODE_REPO`. Planning only.
-- **Never** edit files under `$KNOWLEDGE_CHECKOUT/docs/`, `tasks/`, `changes/`, or `index.md`. Doc updates happen at finalize, when we know what got built. Note expected updates in `plan.md` instead.
+- **Never** edit files under `$KNOWLEDGE_CHECKOUT/docs/`, `changes/`, or `index.md`. Doc updates happen at finalize, when we know what got built. Note expected updates in `plan.md` instead.
 - **Never** commit. The user reviews and commits.

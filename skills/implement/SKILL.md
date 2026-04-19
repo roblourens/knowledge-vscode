@@ -23,7 +23,7 @@ Re-derive what you need each time:
 If `$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/plan.md` exists:
 
 - Read both `plan.md` and `tasks.md` in full.
-- Re-read every doc and task guide listed under "Knowledge context used" in `plan.md`. The plan shouldn't be trusted to summarize them perfectly; the docs are the source of truth.
+- Re-read every doc listed under "Knowledge context used" in `plan.md`. The plan shouldn't be trusted to summarize them perfectly; the docs are the source of truth.
 - Work through `tasks.md` in order, respecting declared dependencies.
 - As tasks complete, update `tasks.md` in place by checking them off and noting any deviations from the plan inline (e.g., `- note: implemented as X instead of Y because Z`). This becomes useful context for `finalize`.
 
@@ -36,7 +36,7 @@ If `$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/plan.md` exists:
 
 ### 3. Implement
 
-Edit files in `$VSCODE_REPO`, run tests, iterate. Refer back to task guides under `$KNOWLEDGE_CHECKOUT/tasks/` whenever you hit a recurring concern (e.g., test strategies, interactive verification, cross-repo coordination).
+Edit files in `$VSCODE_REPO`, run tests, iterate. Re-read the relevant docs (including any prescriptive how-to-work-with-this notes inside them) whenever you hit a recurring concern.
 
 **As you go, keep `tasks.md` current.** If a `tasks.md` exists for this session, after completing each task update it in place: check the task off (`- [x] ...`) and add a short inline note for any deviation from the plan (e.g. `- note: implemented as X instead of Y because Z`). Don't batch this to the end — keep the file in sync with reality task by task. This is what `finalize` reads to write the change summary, and it lets the user see progress at a glance.
 

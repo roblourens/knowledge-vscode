@@ -33,15 +33,32 @@ git merge --ff-only origin/main
 
 The ff-merge should always succeed: the session branch was created from `main` at `init` time and no skill commits to it before `finalize`. If it fails (e.g. the user committed something on the branch by hand, or the working tree has conflicting uncommitted changes), stop and tell the user — don't try to resolve it.
 
-### 1. Take stock
+### 1. Retrospective — what went wrong, and what would have prevented it
 
-Review the conversation history and any notes left under `$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/` (especially the "Discoveries for finalize" section in `tasks.md`). Identify:
+**This is the most important step. Do it before writing anything else.** The point of the knowledge base is to make the *next* session avoid the mistakes of *this* one. If a finalize doesn't surface those mistakes, the knowledge base doesn't compound.
 
-- New understanding about components that should be added to or revised in existing docs.
-- Context that was missing from the knowledge base but turned out to be relevant — things you had to discover by reading code, that should be documented for future sessions.
-- Decisions made and their rationale (these belong in `changes/`, not `docs/`).
+Read the full conversation history of this session and the `## Discoveries for finalize` section of `tasks.md` (if `implement` was used). Look explicitly for:
 
-If nothing in the session changed how the codebase works *or* how we understand it, you can skip steps 2–4 and just write the `changes/` entry.
+- **Wrong initial assumptions** — what did you (or the user) initially believe about the code that turned out to be false? What made you believe it? (Misleading doc, misleading symbol name, misleading comment, plausible-but-wrong analogy from another part of the codebase.)
+- **Dead ends** — approaches you tried, partially built, and then abandoned. Why did they fail? What signal would have told you upfront that they wouldn't work?
+- **Surprises** — behaviour that was not what the docs (or the code's surface area) suggested. Hidden coupling, undocumented preconditions, non-obvious ordering requirements, side effects you didn't expect.
+- **Re-discoveries** — things you had to figure out by reading code that *should* have been in a doc or a `gotcha:` entry. If a previous session encountered the same thing and didn't write it down, that's a pattern.
+- **Tooling / workflow misses** — wrong test command, wrong launch config, slow feedback loop, useful command you didn't know existed until late.
+- **Spec / protocol misreads** — places where the wire contract or generated types didn't match what the code actually does at runtime.
+
+For each item, answer: **what specific addition or change to the knowledge base would have prevented this, and where does it belong?** Map each item to one of:
+
+- A **`gotcha:`** entry on a specific doc (load-bearing weirdness someone would naively "fix" and break).
+- A **`debt:`** entry on a specific doc (something that genuinely is wrong and should be cleaned up).
+- A **doc body update** (the description of how the component works was incomplete or misleading — including any prescriptive "how to work with this" notes that belong with the component).
+- A **new doc** (no doc covers this area at all; that's why it bit you).
+- A **`changes/` summary** entry (decision rationale or narrative that doesn't fit anywhere else, but the next person looking at this area should read it).
+
+Write this mapping down somewhere durable for the rest of finalize to consume — either in your reasoning, or as a scratch list. Steps 2–5 are *executing* on this mapping, not generating it from scratch.
+
+If the session genuinely had no missteps and the existing docs were accurate enough that the work went smoothly, say so explicitly to the user — that's a useful signal too — and skip ahead to step 5 (the `changes/` summary). But err strongly on the side of finding something: "the work went smoothly" is rarely true on inspection.
+
+Note: things like decisions and their rationale belong in `changes/`, not `docs/`. Things about how a component currently works belong in `docs/`. Things to revisit or preserve carefully belong in `## Debt & gotchas`.
 
 ### 2. Update existing docs
 
@@ -104,13 +121,7 @@ For the initial SHA: if the doc describes existing state in the VS Code repo, us
 
 Add a one-line entry to `$KNOWLEDGE_CHECKOUT/index.md` under **Docs** with the doc's name, a keyword-rich one-line description, and its `Covers:` paths.
 
-### 4. Create new task guides if needed
-
-If during this session you developed reusable guidance for a *kind of work* (not a specific component) that other sessions will likely benefit from — e.g., "how to do X", "what tests to write for Y" — create a file under `$KNOWLEDGE_CHECKOUT/tasks/<descriptive-name>.md` and add an entry under **Tasks** in `index.md`.
-
-Task guides do not need a `Covers:` line or changelog — they're prescriptive.
-
-### 5. Write the change entry
+### 4. Write the change entry
 
 Create `$KNOWLEDGE_CHECKOUT/changes/$SESSION_SLUG/summary.md`:
 
@@ -129,18 +140,28 @@ Create `$KNOWLEDGE_CHECKOUT/changes/$SESSION_SLUG/summary.md`:
 - <decision and rationale>
 - ...
 
+## What went wrong or was misunderstood
+The retrospective from step 1, distilled. One bullet per misstep, dead end, wrong assumption, or surprise. Each bullet pairs the mistake with what would have prevented it and where that prevention now lives:
+
+- <what went wrong / what was assumed vs. what was true> — **prevented by:** <`gotcha:` on doc X | `debt:` on doc Y | doc body update on Z | new doc N | this summary>.
+- ...
+
+If the session truly had no missteps, write `- (none — existing knowledge was sufficient)` and explain briefly why this area was already well-covered.
+
 ## What we learned
-- <anything noteworthy that future sessions should know — both about the agent host itself and about how the work went>
+- <other noteworthy things that don't fit above — e.g. observations about the agent host itself, the workflow, or tooling, that aren't tied to a specific mistake>
 
 ## Doc updates
-- <list of docs updated or created in this session>
+- <list of docs updated or created in this session, including which `## Debt & gotchas` entries were added or removed>
 ```
 
-### 6. Clean up the plan
+The **What went wrong** section is mandatory — even if short. It is the durable artifact of step 1. The whole point of finalize is that the next session avoids these mistakes, which only works if they're written down.
+
+### 5. Clean up the plan
 
 Delete the session's plan folder: `rm -rf "$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG"`. (This is the only deletion this skill performs.)
 
-### 7. Report the diff
+### 6. Report the diff
 
 Run `git -C "$KNOWLEDGE_CHECKOUT" status` and `git -C "$KNOWLEDGE_CHECKOUT" diff --stat` and surface the result to the user. Tell them:
 
