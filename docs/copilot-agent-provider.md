@@ -34,14 +34,38 @@ Copilot provider metadata is stored in the session database's `session_metadata`
 - `copilot.workingDirectory` — URI string for the session working directory.
 - `copilot.project.resolved` — marker that project resolution was attempted.
 - `copilot.project.uri` and `copilot.project.displayName` — cached project identity for list metadata.
+- `copilot.worktree.branchName` — set when isolation is `worktree`. Used by the restore path of the [session announcements](#session-announcements-worktree-creation) feature to reconstruct the "Created isolated worktree for branch X" message when a session is reopened.
 
 Use `tryOpenDatabase()` for read-only checks that must not create session data. Use `openDatabase()` only on paths that intentionally create or update Agent Host-owned session data.
+
+## Session announcements (worktree creation)
+
+When `_resolveSessionWorkingDirectory` creates an isolated worktree, the user should see a "Created isolated worktree for branch `X`" message at the top of the very first response — both live as the model is replying, and on every subsequent reopen of the session.
+
+The message is plain markdown, so it's surfaced through the existing AHP delta channel rather than a dedicated event type. There are two paths and they're independent:
+
+1. **Live path (first turn only).** `_resolveSessionWorkingDirectory` populates `_pendingFirstTurnAnnouncements: Map<sessionId, string>` with the rendered markdown. The first call to `sendMessage` for that session drains the entry (one-shot `get` + `delete`) and fires a synthetic `IAgentDeltaEvent` whose `messageId` is `copilot-announcement-<uuid>` *before* delegating to the SDK. The session-handler mapper appends the SDK's subsequent deltas to the same markdown part, so the announcement and the model's reply render as one continuous markdown block.
+
+2. **Restore path (every reopen, including across process restarts).** `getSessionMessages` reads `copilot.worktree.branchName` via `tryOpenDatabase()` and calls the local `prependAnnouncementToFirstAssistantMessage(messages, text)` helper. It walks the message list and prepends the announcement to the **first top-level assistant message** — `m.type === 'message' && m.role === 'assistant' && !m.parentToolCallId`. Subagent inner messages are skipped on purpose so the announcement lands on the parent turn, not buried inside a subagent's history. If no top-level assistant message exists yet, the messages are returned unchanged — the live path is the only thing that fires before any reply has been recorded, and the announcement is acceptable to lose if the agent process restarts in that narrow window.
+
+The announcement text is built by the local `buildWorktreeAnnouncementText(branchName)` — a `localize(...)` call that wraps `branchName` with `appendEscapedMarkdownInlineCode(...)` (see [tool display messages](#tool-display-messages) for the same rule applied to tool messages) and ends with `'\n\n'` so it visually separates from whatever follows when concatenated.
+
+The `IAgentDeltaEvent` field is `content`, not `delta` — easy to get wrong because of the event's name.
 
 ## Testing Pattern
 
 Focused tests live in `copilotAgent.test.ts`. The SDK client is injected through a narrow protected factory seam because the SDK `CopilotClient` type has private members, which prevents lightweight structural fakes from being assigned to the class type directly.
 
 For database-sensitive behavior, prefer real in-memory `SessionDatabase(':memory:')` instances where possible. The Copilot provider tests keep a small fake `ISessionDataService` only to control which session IDs have an existing database; the database implementation itself is real. This lets tests assert both the positive path (stored metadata is read) and the negative path (`listSessions()` does not call `openDatabase()` for unowned SDK sessions).
+
+For end-to-end flows that involve session lifecycle (create → resume → sendMessage → restore), the test file defines a `TestableCopilotAgent` subclass that overrides `_resumeSession` to splice in a fake session implementing the minimal `IFakeAgentSession` interface (`send`, `getMessages`, `dispose`). Both `_resumeSession` and `_resolveSessionWorkingDirectory` are `protected` on `CopilotAgent` for this purpose. This is what makes it possible to write tests that actually exercise the full path through `sendMessage` and `getSessionMessages` without spinning up the real SDK — preferred over tests that only verify a helper's string concatenation in isolation.
+
+Tests under `src/vs/platform/agentHost/test/node/` have two hygiene rules that are easy to trip on:
+
+- **Don't import from `'path'`.** Use `URI.joinPath(...)` and string-concat against `os.tmpdir()` instead. The repo lint blocks the `path` import.
+- **No `as unknown as T` style assertions.** Blocked by `local/code-no-dangerous-type-assertions`. If a generic helper signature would force one, refactor to a non-generic signature with a narrow type alias and a single safe cast inside the helper after a runtime discriminant check (`m.type === 'message' && m.role === 'assistant'`).
+
+Run via `npm run test-node -- --grep <pattern>`. Don't use `scripts/test.sh` — it depends on Electron and crashes outside an interactive session.
 
 ## Session-State Auto-Approval
 
@@ -95,6 +119,10 @@ For markdown file links, `formatPathAsMarkdownLink()` already produces the `[nam
 - **gotcha** (2026-04-19, copilotAgentSession.ts:getCopilotCLISessionStateDir) — prefer `INativeEnvironmentService.userHome.fsPath` over `import { homedir } from 'os'` for the home directory. The service is available in the agent-host process (registered in both startup paths) and makes testing easier.
 
 - **gotcha** (2026-04-19, copilotShellTools.ts:executeCommandWithShellIntegration/executeCommandWithSentinel) — for bash/zsh managed shells, commands are prepended with a leading space to keep them out of shell history. This relies on `VSCODE_PREVENT_SHELL_HISTORY=1` being set on the PTY env (which the shell integration scripts translate to `HISTCONTROL=ignorespace`/`HIST_IGNORE_SPACE`). If you change either side independently, history suppression silently breaks. PowerShell intentionally has no prefix — PSReadLine handles it server-side.
+- **gotcha** (2026-04-19, copilotAgent.ts:prependAnnouncementToFirstAssistantMessage) — the restore path for session announcements skips messages with `parentToolCallId` so the prepend lands on the **first top-level** assistant message. If you change this to "first assistant message", the announcement gets buried inside a subagent's history and disappears from the parent turn. Keep the `!m.parentToolCallId` filter.
+- **gotcha** (2026-04-19, copilotAgent.ts:sendMessage worktree announcement) — the live-path "first turn" announcement is intentionally in-process only (`_pendingFirstTurnAnnouncements` Map). It's lost if the agent process restarts between worktree creation and the first user prompt — that window is acceptable to lose, because the restore path covers every reopen once any reply exists. Don't add a DB-backed "emitted" flag to "fix" this; we tried and reverted (see `changes/2026-04-19-worktree-progress-message/`).
+- **gotcha** (2026-04-19, agentService.ts:IAgentDeltaEvent) — the field is `content`, not `delta`. The event's name makes `delta` a tempting typo; producers and consumers (and the Copilot reviewer's auto-suggestions) both get this wrong.
+- **gotcha** (2026-04-19, copilotAgent.test.ts) — tests under `src/vs/platform/agentHost/test/node/` cannot `import 'path'` (lint blocks it) and cannot use `as unknown as T` (blocked by `local/code-no-dangerous-type-assertions`). Use `URI.joinPath` + `os.tmpdir()`, and refactor generic helpers to a non-generic signature with a single discriminant-checked cast inside.
 
 ## Related
 
@@ -108,3 +136,4 @@ For markdown file links, `formatPathAsMarkdownLink()` already produces the `[nam
 - **2026-04-18** — `ef2cdf49e1` — added `copilotToolDisplay.ts` to Covers; documented the `md()` wrapping requirement, the keep-markdown-out-of-localize rule, and the `appendEscapedMarkdownInlineCode` helper for `StringOrMarkdown` display fields, with a gotcha entry covering all three.
 - **2026-04-19** — `e625d61aa4` — added `copilotShellTools.ts` to Covers; documented `ShellManager` managed shells and the always-on shell-history suppression (env var + leading-space prefix) that mirrors the workbench `commandLinePreventHistoryRewriter`.
 - **2026-04-19** — `bea3e7e018` — added `copilotAgentSession.ts` and `copilotAgentSession.test.ts` to Covers; documented session-state auto-approval in `handlePermissionRequest`, SDK callback error logging, and four gotchas (write `fileName` vs `path`, SDK swallows exceptions, prefer env service, traversal normalization).
+- **2026-04-19** — `adc4f6e17e` — documented the worktree-creation session announcement (live delta + restore-path prepend, dual paths against the same markdown via `_pendingFirstTurnAnnouncements` and `copilot.worktree.branchName` metadata); added the `copilot.worktree.branchName` metadata key; expanded the testing pattern with `TestableCopilotAgent` / `IFakeAgentSession` and the `test/node/` hygiene rules (no `'path'` import, no `as unknown as T`); added gotchas for the subagent-skip in the restore prepend, the deliberately-non-persistent live path, the `IAgentDeltaEvent.content` field name, and the test-file lint rules.
