@@ -27,7 +27,7 @@ For each chat session backed by an Agent Host, the handler:
 - Choosing models — that's `AgentHostLanguageModelProvider` (`agentHostLanguageModelProvider.ts`).
 - Discovering agents and registering chat session contributions — that's `AgentHostContribution` (`agentHostChatContribution.ts`), which listens to local `rootState.agents` and dynamically registers one chat session type per advertised agent (`agent-host-${agent.provider}`).
 - Listing sessions in the workbench chat list — that's `AgentHostSessionListController` (`agentHostSessionListController.ts`), backed by `connection.listSessions()`.
-- Showing sessions in the Sessions app — that's the `*AgentHostSessionsProvider` family under `src/vs/sessions/contrib/`.
+- Showing sessions in the Sessions app — that's the `*AgentHostSessionsProvider` family under `src/vs/sessions/contrib/`; see [agent-host-sessions-providers](./agent-host-sessions-providers.md).
 
 ## Local vs. remote
 
@@ -83,6 +83,7 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 
 - [agent-host-topology](./agent-host-topology.md) — the two-app topology and three deployment configurations the handler runs in.
 - [agent-host-protocol](./agent-host-protocol.md) — the contract this handler consumes and dispatches against.
+- [agent-host-sessions-providers](./agent-host-sessions-providers.md) — the other consumer of the same `StateComponents.Session` subscriptions, in the Sessions app.
 
 ## Debt & gotchas
 
@@ -92,3 +93,4 @@ _(Empty for now. Entries take the form `- **debt|gotcha** (YYYY-MM-DD, file:symb
 
 - **2026-04-16** — `6cd94ddc6f` — initial entry. Captures the role of `AgentHostSessionHandler` as the shared local/remote adapter between AHP session state and VS Code chat sessions, including turn dispatch, progress rendering, active-turn reconnect, server-initiated turns, permissions, client tools, file edits, terminals, subagents, auth retries, and customization refs. Drawn from the prior `agent-host-chat-sessions` skill.
 - **2026-04-16** — `6cd94ddc6f` — added `IAgentHostSessionHandlerConfig` example showing the local-vs-remote seam, and cross-referenced the new topology doc.
+- **2026-04-18** — `96ab46a042` — cross-linked to the new agent-host-sessions-providers doc; clarified that the providers share the same refcounted `StateComponents.Session` subscriptions.
