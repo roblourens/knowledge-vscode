@@ -9,10 +9,10 @@ Prepares the VS Code agent host knowledge repo for use in the current session. O
 
 ## Run the script
 
-`init-session.sh` does all the work — branch naming, worktree creation, the `.knowledge/` symlink, and the `.git/info/exclude` line:
+`init-session.sh` does all the work — branch naming, worktree creation, the `.knowledge/` symlink, and the `.git/info/exclude` line. The script lives next to this skill at `<skill-dir>/scripts/init-session.sh`. Derive `<skill-dir>` from the absolute path of this SKILL.md (the directory containing it).
 
 ```sh
-"$KNOWLEDGE_REPO/scripts/init-session.sh"
+"<skill-dir>/scripts/init-session.sh"
 ```
 
 Resolve `KNOWLEDGE_REPO` from the user's VS Code setting if they have one configured; otherwise fall back to the repo this `SKILL.md` ships in (three directories up from this file).

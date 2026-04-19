@@ -15,10 +15,12 @@ This skill is the counterpart to `finalize`. `finalize` writes the diff for the 
 
 ## Run the script
 
+The script lives next to this skill at `<skill-dir>/scripts/land-session.sh`. Derive `<skill-dir>` from the absolute path of this SKILL.md (the directory containing it).
+
 ```sh
-scripts/land-session.sh                 # default
-scripts/land-session.sh -m "<message>"  # override commit message
-scripts/land-session.sh --no-push       # land locally but don't push origin/main
+<skill-dir>/scripts/land-session.sh                 # default
+<skill-dir>/scripts/land-session.sh -m "<message>"  # override commit message
+<skill-dir>/scripts/land-session.sh --no-push       # land locally but don't push origin/main
 ```
 
 The script (in this order):
