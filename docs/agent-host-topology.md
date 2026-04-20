@@ -32,7 +32,7 @@ This is why the protocol's data model is so deliberately neutral:
 There are exactly two places where VS Code (and other clients) are allowed to read meaning out of otherwise-generic data, by **convention**, not by protocol:
 
 **1. Well-known property names in generic configuration.**
-Models and sessions carry a generic configuration bag. VS Code recognizes a small set of well-known property names in that bag and triggers specific UI for them. The protocol still treats the bag as opaque — only the *names* are conventions, agreed across implementations that want VS Code-friendly UI.
+Models and sessions carry a generic configuration bag. VS Code recognizes a small set of well-known property names in that bag and triggers specific UI for them. The protocol still treats the bag as opaque — only the *names* are conventions, agreed across implementations that want VS Code-friendly UI. Concrete example: the `autoApprove` session-config property triggers the unified permission picker — see [agent-host-auto-approve-picker](./agent-host-auto-approve-picker.md) for how recognition (by enum *shape*, not name alone) and the fallback to the generic per-property picker work.
 
 **2. Tool-call kinds and metadata.**
 Tool calls carry a `toolKind` (e.g. `'terminal'`) and a metadata bag. VS Code uses these to decide rendering — a `toolKind: 'terminal'` call gets the syntax-highlighted command + output renderer; everything else falls through to the generic `invocationMessage` / `pastTenseMessage` renderer (see `stateToProgressAdapter.ts`). The renderer **never matches on tool name**.
@@ -156,6 +156,7 @@ If you can't place a piece of code in exactly one of these buckets, that's the m
 - [agent-host-protocol](./agent-host-protocol.md) — the wire contract this doc is the philosophy for.
 - [copilot-agent-provider](./copilot-agent-provider.md) — provider-level Copilot SDK session ownership and local metadata behavior.
 - [agent-host-session-handler](./agent-host-session-handler.md) — the shared handler used in all three configurations.
+- [agent-host-auto-approve-picker](./agent-host-auto-approve-picker.md) — the concrete worked example of the well-known `autoApprove` config property convention.
 
 ## Debt & gotchas
 
@@ -167,3 +168,4 @@ If you can't place a piece of code in exactly one of these buckets, that's the m
 - **2026-04-17** — `9364e338cc` — clarified that SDK-backed providers own session filtering/adoption boundaries before generic aggregation or UI listing.
 - **2026-04-19** — `bea3e7e018` — added gotcha: agent-host child process registers only `INativeEnvironmentService`, not the base `IEnvironmentService` token.
 - **2026-04-20** — `d05eca7455` — added "Designing for the spec and the in-tree client, not for theoretical external ones" as a corollary to the cardinal rule. Captures the principle that we do not over-flex APIs to accommodate hypothetical future external callers — the spec is the contract and the in-tree consumer is the design target.
+- **2026-04-20** — `7f8e7e0f0c` — added the `autoApprove` session-config property as a concrete worked example of well-known convention #1, with a pointer to the new [agent-host-auto-approve-picker](./agent-host-auto-approve-picker.md) doc.

@@ -62,7 +62,7 @@ The providers maintain three related caches that together drive the session-conf
 
 `getSessionConfig(sessionId)` returns `_newSessionConfigs.get(sessionId) ?? _runningSessionConfigs.get(sessionId)` and synchronously kicks off `_ensureSessionStateSubscription(sessionId)` for the running case. The `??` ordering matters: the new-session form must always win over a stale running entry while the user is creating a session.
 
-The picker side (`agentHostSessionConfigPicker.ts`) renders synchronously and tolerates `undefined` — it relies on `provider.onDidChangeSessionConfig` firing once a value arrives.
+The picker side (`agentHostSessionConfigPicker.ts`) renders synchronously and tolerates `undefined` — it relies on `provider.onDidChangeSessionConfig` firing once a value arrives. The well-known `autoApprove` property is dispatched separately to a unified permission picker — see [agent-host-auto-approve-picker](./agent-host-auto-approve-picker.md).
 
 ## Lazy seeding from `ISessionState.config`
 
@@ -114,7 +114,7 @@ When adding logic that has to be identical between local and remote, prefer exte
 - A change that should apply to both providers identically → put it on `BaseAgentHostSessionsProvider` (or the shared adapter) in `agentHost/browser/baseAgentHostSessionsProvider.ts`. Pure types/helpers go into `common/agentHostSessionsProvider.ts`.
 - Local-only behaviour → `agentHost/browser/localAgentHostSessionsProvider.ts`.
 - Remote-only behaviour (connection lifecycle, sticky auth-pending, well-known agent type mapping, remote folder picker) → `remoteAgentHost/browser/remoteAgentHostSessionsProvider.ts`.
-- Picker UI behavior → `src/vs/sessions/contrib/chat/browser/agentHostSessionConfigPicker.ts`.
+- Picker UI behavior → `src/vs/sessions/contrib/chat/browser/agentHostSessionConfigPicker.ts` for the generic per-property picker; `src/vs/sessions/contrib/chat/browser/agentHost/` for the well-known `autoApprove` picker (see [agent-host-auto-approve-picker](./agent-host-auto-approve-picker.md)).
 - What gets persisted, when, and where the database lives → `src/vs/platform/agentHost/node/agentService.ts` (`createSession` / `restoreSession`) and `src/vs/platform/agentHost/node/agentSideEffects.ts` (`SessionConfigChanged`).
 - AHP wire shape (`ISessionState.config`, `ISessionConfigPropertySchema`) → see [agent-host-protocol](./agent-host-protocol.md).
 
@@ -123,6 +123,7 @@ When adding logic that has to be identical between local and remote, prefer exte
 - [agent-host-topology](./agent-host-topology.md) — how the Sessions app relates to the workbench app.
 - [agent-host-protocol](./agent-host-protocol.md) — `ISessionState.config`, subscriptions, and the refcounted `getSubscription` model.
 - [agent-host-session-handler](./agent-host-session-handler.md) — the other consumer of the same `StateComponents.Session` subscriptions.
+- [agent-host-auto-approve-picker](./agent-host-auto-approve-picker.md) — how the well-known `autoApprove` config property bridges into the unified permission picker.
 
 ## Debt & gotchas
 
@@ -134,6 +135,8 @@ When adding logic that has to be identical between local and remote, prefer exte
 - **debt** (2026-04-18, baseAgentHostSessionsProvider.ts:_handleConfigChanged) — `_handleConfigChanged` still has its old `buildMutableConfigSchema(config)` fallback path. Now that lazy seeding works, that branch will normally not fire before the subscription arrives. Worth revisiting whether it can be removed once we're confident no edge case still depends on it.
 
 ## Changelog
+
+- **2026-04-20** — `7f8e7e0f0c` — added cross-reference to new [agent-host-auto-approve-picker](./agent-host-auto-approve-picker.md) doc in the picker section, the "Where to edit" line, and the Related section. The `autoApprove` config property is now dispatched out of the generic per-property loop into a unified permission picker shared with the Copilot-CLI flow.
 
 - **2026-04-20** — `d05eca7455` — added "One-shot `_ensureSessionCache` + auth-aware eager load" section covering why the cache is one-shot, how the local provider's `autorun(authenticationPending)` constructor wiring drives the retry, and why the silent catch in `_refreshSessions` is correct. Added matching gotcha. Cross-references the new "Authentication contract" section in `copilot-agent-provider.md`.
 
