@@ -92,6 +92,7 @@ The `seq` drives **replay-based reconnection**: a client that drops and reattach
 - **The list API returns summaries, not full state.** A field that should appear in lists belongs on `ISessionSummary` / `IAgentSessionMetadata`, not on `ISessionState`. Pushing back on upstream protocol changes that put list fields on the wrong type is part of working in this layer.
 - **Keep agent-specific knowledge out of state types.** Tool calls expose generic display fields (`displayName`, `invocationMessage`, `pastTenseMessage`, `toolKind`); they never carry raw agent tool names. If you need new rendering behavior, add a new `toolKind` value (a well-known convention — see [agent-host-topology](./agent-host-topology.md#the-two-sanctioned-exceptions-well-known-conventions)), not a tool-name check.
 - **Capability flags, not silent behavior changes.** When a client must feature-detect server support, add a flag to `sessionCapabilities.ts`. Silent behavior changes break older clients against newer servers and vice versa.
+- **Authentication errors are explicit, not empty responses.** When an agent declares `protectedResources` with `required: true` (the default), commands invoked on it before authentication MUST throw `ProtocolError(AHP_AUTH_REQUIRED, ...)` (-32007). Returning an empty result instead — empty session list, empty model list, etc. — is a silent lie that violates the AHP contract and breaks any consumer that caches the first response. The principle the protocol commits to: a response of "I don't know yet" is never indistinguishable from "I know, and the answer is empty." See `copilot-agent-provider.md` for the concrete violation that motivated capturing this rule, and `agent-host-sessions-providers.md` for how the renderer-side `authenticationPending` autorun retries cleanly off the throw.
 
 ## Related
 
@@ -100,9 +101,10 @@ The `seq` drives **replay-based reconnection**: a client that drops and reattach
 
 ## Debt & gotchas
 
-_(Empty for now. Entries take the form `- **debt|gotcha** (YYYY-MM-DD, file:symbol) — description`.)_
+- **gotcha** (2026-04-20, AHP authentication contract — `protectedResources.required: true`) — agents whose `protectedResources` declare `required: true` (default) MUST throw `AHP_AUTH_REQUIRED` (-32007) for any command issued before authentication, NOT return empty results. The provider-side temptation is to return `[]` from `listSessions` / model list etc. when no token; that silently breaks one-shot caches in the consumer and causes hard-to-trace UI bugs (sidebar shows nothing forever until something else forces a refresh). See `changes/2026-04-20-fix-initial-session-list-display/` and the concrete rule in `copilot-agent-provider.md`.
 
 ## Changelog
 
 - **2026-04-16** — `6cd94ddc6f` — initial entry. Captures the AHP architecture as of `origin/main`: generic JSON-RPC + immutable state, URI-addressed root / session / terminal resources, action envelopes with server sequence numbers, optimistic session subscriptions, server-confirmed root/terminal subscriptions, capability-flag versioning. Drawn from the prior `agent-host-chat-sessions` skill.
 - **2026-04-16** — `6cd94ddc6f` — added concrete `IActionEnvelope` shape, subscription-class table, file-tree view of `state/`, and a generic-types/capabilities gotcha cross-referencing the new topology doc.
+- **2026-04-20** — `d05eca7455` — added a "Patterns and gotchas" entry and matching `## Debt & gotchas` entry covering the AHP authentication contract: `required: true` resources MUST throw `AHP_AUTH_REQUIRED`, not return empty results. Triggered by the renderer-side cache-bug investigation in `changes/2026-04-20-fix-initial-session-list-display/`.

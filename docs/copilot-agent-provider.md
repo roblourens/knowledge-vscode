@@ -16,6 +16,12 @@ _Covers: src/vs/platform/agentHost/node/copilot/copilotAgent.ts, src/vs/platform
 
 It does not own AHP state shape or workbench rendering. Contract changes belong in [agent-host-protocol](./agent-host-protocol.md); turn execution and rendering belong in [agent-host-session-handler](./agent-host-session-handler.md).
 
+## Authentication contract
+
+`listSessions()` and `_listModels()` both go through `_ensureClient()`, which throws `ProtocolError(AHP_AUTH_REQUIRED, ...)` when `_githubToken` is unset. This is required by the AHP spec — Copilot's `protectedResources` declares `required: true`, which the [authentication spec](https://github.com/microsoft/agent-host-protocol/blob/main/docs/specification/authentication.md) mandates the server return `AuthRequired` (-32007) for, not silently respond with empty data. `_refreshModels()` is the only caller that swallows the throw (it guards on `!_githubToken` first and catches errors), because the models observable has no other natural retry path; everything else relies on the renderer-side `authenticationPending` autorun in [`LocalAgentHostSessionsProvider`](./agent-host-sessions-providers.md#one-shot-_ensuresessioncache--auth-aware-eager-load) to drive the retry.
+
+Returning `[]` instead of throwing was a real bug: it caused the Agents-app sidebar to never display sessions on a fresh launch (the renderer's one-shot cache held the empty response forever; only `notify/sessionAdded` from the user's first message broke the deadlock). See [changes/2026-04-20-fix-initial-session-list-display](../changes/2026-04-20-fix-initial-session-list-display/summary.md).
+
 ## Session Ownership
 
 The Copilot SDK can list sessions that were created outside VS Code's Agent Host, such as sessions from other Copilot CLI agents. `CopilotAgent.listSessions()` is responsible for filtering SDK results down to sessions that VS Code Agent Host owns or has already adopted.
@@ -124,6 +130,7 @@ For markdown file links, `formatPathAsMarkdownLink()` already produces the `[nam
 - **gotcha** (2026-04-19, agentService.ts:IAgentDeltaEvent) — the field is `content`, not `delta`. The event's name makes `delta` a tempting typo; producers and consumers (and the Copilot reviewer's auto-suggestions) both get this wrong.
 - **gotcha** (2026-04-19, copilotAgent.test.ts) — tests under `src/vs/platform/agentHost/test/node/` cannot `import 'path'` (lint blocks it) and cannot use `as unknown as T` (blocked by `local/code-no-dangerous-type-assertions`). Use `URI.joinPath` + `os.tmpdir()`, and refactor generic helpers to a non-generic signature with a single discriminant-checked cast inside.
 - **gotcha** (2026-04-19, copilotToolDisplay.ts:getSubagentMetadata) — SDK-specific argument parsing (e.g. extracting `agent_type` from the `task` tool's args) lives here, NOT in the generic `agentEventMapper.ts`. The mapper only forwards already-normalized `subagentAgentName` / `subagentDescription` event fields. The SDK's `task` tool destructures `agent_type` (snake_case) — there is no `agentName` field; don't add a fallback for one.
+- **gotcha** (2026-04-20, copilotAgent.ts:listSessions / _listModels) — both methods MUST throw `AHP_AUTH_REQUIRED` (via `_ensureClient()`) when `_githubToken` is unset. Do NOT short-circuit with `return []` — that's a silent lie that violates the AHP `required: true` contract and breaks consumers that cache the first response (the Agents-app sidebar's `BaseAgentHostSessionsProvider._ensureSessionCache` is one-shot; an empty cached list never recovers until `notify/sessionAdded` fires). The renderer-side `authenticationPending` autorun is the natural retry trigger after auth settles. The historical `returns empty models and sessions before authentication` test pinned the wrong behavior as if it were a feature; updated to expect the throw.
 
 ## Related
 
@@ -132,6 +139,8 @@ For markdown file links, `formatPathAsMarkdownLink()` already produces the `[nam
 - [agent-host-session-handler](./agent-host-session-handler.md) — downstream turn and chat integration after a session is selected.
 
 ## Changelog
+
+- **2026-04-20** — `d05eca7455` — added "Authentication contract" section documenting that `listSessions` and `_listModels` throw `AHP_AUTH_REQUIRED` via `_ensureClient()` when no token (per AHP `required: true` spec); added gotcha against silently returning `[]` and noted the prior test that pinned the wrong behavior.
 
 - **2026-04-17** — `9364e338cc` — initial entry documenting CopilotAgent SDK session filtering, database-backed ownership, metadata keys, and focused test seams.
 - **2026-04-18** — `ef2cdf49e1` — added `copilotToolDisplay.ts` to Covers; documented the `md()` wrapping requirement, the keep-markdown-out-of-localize rule, and the `appendEscapedMarkdownInlineCode` helper for `StringOrMarkdown` display fields, with a gotcha entry covering all three.

@@ -41,6 +41,18 @@ These conventions live *outside* the protocol spec. They're how a generic protoc
 
 If you're tempted to add a third exception — stop. Almost always the right move is either (a) a new generic field on the protocol side, or (b) a new well-known convention that fits one of the two existing buckets. Adding VS Code names to the protocol itself is the failure mode.
 
+### Designing for the spec and the in-tree client, not for theoretical external ones
+
+A corollary of "neither side is VS Code" that is **not** "design for hypothetical third-party callers":
+
+> The protocol is open; the *design target* for any concrete change is the AHP spec plus the actual in-tree client (or server) that uses it. We do **not** speculatively over-flex APIs to accommodate unknown future external callers.
+
+When weighing two contract shapes, the weight goes to: **what does the spec mandate, and what does our concrete in-tree consumer need?** Not: "but a future external client might prefer X." If a future external client appears, *they* adapt to the spec — that's the whole point of having a spec. Optimizing for unspecified third-party callers leads to over-flexible APIs where every method takes a config bag, every error becomes an empty-result fallback, and every behavior is opt-in. That isn't generality; it's under-decided design.
+
+Concrete example: when `CopilotAgent.listSessions()` was returning `[]` instead of throwing `AHP_AUTH_REQUIRED` on missing auth, one tempting "fix" was to make the throw-vs-empty behavior configurable so callers could choose. That would have been catering to imaginary clients; the spec says throw, our in-tree client (the renderer's `authenticationPending` autorun) handles the throw cleanly, and that's the end of the discussion. See [changes/2026-04-20-fix-initial-session-list-display](../changes/2026-04-20-fix-initial-session-list-display/summary.md) for the full reasoning.
+
+This rule is the natural complement to the cardinal rule. "Neither side is VS Code" tells you not to bake VS Code names into the wire; **this** rule tells you not to bake hypothetical callers into the design either. The spec is the contract; both sides serve it.
+
 ## 2. Topology: two apps, three configurations
 
 The VS Code repo ships **two apps** that share most of the agent-host code:
@@ -154,3 +166,4 @@ If you can't place a piece of code in exactly one of these buckets, that's the m
 - **2026-04-16** — `6cd94ddc6f` — initial entry. Captures the AHP generic-protocol philosophy (neither client nor server is "VS Code"), the two sanctioned convention exceptions (well-known config property names; tool-call kinds + metadata), the two-app topology (VS Code app vs Agents app — the latter still rooted at `src/vs/sessions/`), the three deployment configurations (VS Code + local; Agents + local; Agents + remote × N), the `IAgentConnection` / `AgentHostSessionHandler` shared seam with `connectionAuthority` and `sessionType` as the only per-configuration variations, and the where-to-put-new-code decision tree.
 - **2026-04-17** — `9364e338cc` — clarified that SDK-backed providers own session filtering/adoption boundaries before generic aggregation or UI listing.
 - **2026-04-19** — `bea3e7e018` — added gotcha: agent-host child process registers only `INativeEnvironmentService`, not the base `IEnvironmentService` token.
+- **2026-04-20** — `d05eca7455` — added "Designing for the spec and the in-tree client, not for theoretical external ones" as a corollary to the cardinal rule. Captures the principle that we do not over-flex APIs to accommodate hypothetical future external callers — the spec is the contract and the in-tree consumer is the design target.
