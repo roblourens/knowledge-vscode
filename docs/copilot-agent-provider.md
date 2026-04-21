@@ -34,6 +34,8 @@ Any existing per-session database qualifies as owned. This intentionally keeps t
 
 After a session passes the database gate, `listSessions()` may resolve project metadata and store the resolution to avoid rediscovering git context on later lists. That write is safe because the database already existed before the list operation considered the session owned.
 
+This database-existence gate is the local-agent-host half of the coexistence contract with the extension-host `CopilotChatSessionsProvider`. The extension provider has its own symmetric filter via `IChatSessionMetadataStore.getSessionOrigin()` — sessions without the extension's per-session JSON metadata return `'other'` and are excluded. Together these two filters ensure each provider shows only its own sessions with no overlap. See [agent-host-sessions-providers § Coexistence](./agent-host-sessions-providers.md#coexistence-with-the-extension-host-provider).
+
 ## Metadata
 
 Copilot provider metadata is stored in the session database's `session_metadata` table. Current keys include:
@@ -144,6 +146,7 @@ For markdown file links, `formatPathAsMarkdownLink()` already produces the `[nam
 
 ## Changelog
 
+- **2026-04-21** — `7bc767483b` — added coexistence paragraph to Session Ownership section explaining how the database-existence gate pairs with the extension provider's `getSessionOrigin()` filter. Cross-links to new [agent-host-sessions-providers § Coexistence](./agent-host-sessions-providers.md#coexistence-with-the-extension-host-provider).
 - **2026-04-20** — `d05eca7455` — added "Authentication contract" section documenting that `listSessions` and `_listModels` throw `AHP_AUTH_REQUIRED` via `_ensureClient()` when no token (per AHP `required: true` spec); added gotcha against silently returning `[]` and noted the prior test that pinned the wrong behavior.
 
 - **2026-04-17** — `9364e338cc` — initial entry documenting CopilotAgent SDK session filtering, database-backed ownership, metadata keys, and focused test seams.
