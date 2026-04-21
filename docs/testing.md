@@ -76,6 +76,7 @@ Auth comes from `gh auth token` by default; override with `GITHUB_TOKEN`.
 **When to use:**
 - Validating that an SDK-specific assumption (event names, tool arg shapes, error envelopes) actually holds. The fix that moved subagent arg parsing into `copilotToolDisplay.ts::getSubagentMetadata` was driven by adding a real-SDK assertion that `agent_type` is what the SDK actually emits.
 - Catching regressions in SDK adapter code (`copilot/copilotAgentSession.ts`, `copilot/mapSessionEvents.ts`, `copilot/copilotToolDisplay.ts`) before they hit users.
+- **Catching SDK type-vs-schema drift.** The bundled `@github/copilot` server's runtime JSON schema can diverge from `@github/copilot-sdk`'s `.d.ts` types within a single release line — at 1.0.34, `ModelCapabilities.limits` was optional in the schema but required in the types, so direct dereferences like `m.capabilities.limits.max_context_window_tokens` threw `TypeError` at runtime on the first model with no `limits` field. The `listModels returns well-shaped model entries after authenticate` test was added in the 2026-04-21 SDK-bump session specifically to guard this class of bug. Add similar shape-asserting tests when adding new SDK-typed dereferences in adapter code.
 
 **When *not* to use:**
 - For routine logic. The auth-and-network hop makes them slow and occasionally flaky; CI does not run them by default.
@@ -124,8 +125,10 @@ Otherwise — single class or function, drive with events, assert on state?
 
 ## Debt & gotchas
 
-_(Empty for now. Entries take the form `- **debt|gotcha** (YYYY-MM-DD, file:symbol) — description`.)_
+- **gotcha** (2026-04-21, protocol/toolApprovalRealSdk.integrationTest.ts) — gated on `AGENT_HOST_REAL_SDK=1` and not run by CI, so any string identifier embedded in this file (provider ids, agent names, well-known config keys) can sit broken indefinitely after a rename — TypeScript doesn't catch it (the API parameters are typed as plain `string`) and the suite never runs unattended. When renaming anything in the agent host that has a corresponding string in this file, manually run the full suite (`AGENT_HOST_REAL_SDK=1 ./scripts/test-integration.sh --runGlob "**/agentHost/**/toolApprovalRealSdk.integrationTest.js"`) and grep the file for the old name.
+- **gotcha** (2026-04-21, protocol/toolApprovalRealSdk.integrationTest.ts:Protocol WebSocket — Real Copilot SDK suite) — `planning-mode` and `subagent` tests have been failing for ≥ a release cycle (reproduce on `@github/copilot@1.0.24` too). `planning-mode` because `SessionOptions.onExitPlanMode` is never wired into `CopilotAgentSession`; `subagent` because the parent `approvalLoop` never sees `approvalsActive=false` after a timeout and the test hangs past 180s. Both are pre-existing and out of scope for casual SDK-bump work; if you're fixing them, do it in its own change.
 
 ## Changelog
 
+- **2026-04-21** — `4da62d3b09` — added `listModels` example to "When to use" in section 3 (real-SDK tests catch SDK type-vs-schema drift); added gotchas about the env-gated real-SDK file's invisibility to CI (rename audit risk) and the two known-broken tests in that suite.
 - **2026-04-19** — `2935e7d695` — initial entry. Documents the four test layers (unit, protocol integration, real-SDK integration, workbench/UI), how to run each, when to pick which, and workflow gotchas (`unset ELECTRON_RUN_AS_NODE`, retranspile before integration runs, regression tests should be verified by briefly reverting the fix).
