@@ -35,7 +35,7 @@ The handler is connection-agnostic: it works against `IAgentConnection`, which b
 
 ```typescript
 interface IAgentHostSessionHandlerConfig {
-    readonly provider: AgentProvider;     // e.g. 'copilot'
+    readonly provider: AgentProvider;     // e.g. 'copilotcli'
     readonly agentId: string;
     readonly sessionType: string;          // identifies (host × agent) in chat sessions
     readonly fullName: string;
@@ -127,3 +127,4 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 - **2026-04-18** — `96ab46a042` — cross-linked to the new agent-host-sessions-providers doc; clarified that the providers share the same refcounted `StateComponents.Session` subscriptions.
 - **2026-04-19** — `b708764819` — added a "Remote file links in tool messages" section covering `rewriteMarkdownLinks` in `stateToProgressAdapter.ts`, the deliberate empty-text rewrite, and its dependency on `ChatContentMarkdownRenderer` augmenting `allowedLinkSchemes` with `AGENT_HOST_SCHEME`; added a gotcha capturing the silent-failure mode if the two sides drift.
 - **2026-04-19** — `2935e7d695` — added "Subagent rendering" section covering buffering, deferred `_toolCallAgents` registration, independent `description`/`agentName` updates in `chatSubagentContentPart.ts`, and parent-without-child cleanup. Cross-linked the new testing doc and added subagent-related test references.
+- **2026-04- ` updated the example `provider:` value in the `IAgentHostSessionHandlerConfig` snippet from `'copilot'` to `'copilotcli'` (`CopilotAgent.id` rename).00f882a16c` 20** 

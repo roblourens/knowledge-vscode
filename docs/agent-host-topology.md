@@ -109,10 +109,10 @@ Both contributions construct the same `AgentHostSessionHandler` with a config li
 
 ```typescript
 new AgentHostSessionHandler({
-    provider:            agent.provider,        // e.g. 'copilot'
+    provider:            agent.provider,        // e.g. 'copilotcli'
     agentId:             sessionType,
-    sessionType,                                 // 'agent-host-copilot' or
-                                                 // 'remote-agent-host-<remote>-copilot'
+    sessionType,                                 // 'agent-host-copilotcli' or
+                                                 // 'remote-agent-host-<remote>-copilotcli'
     fullName:            agent.displayName,
     description:         agent.description,
     connection:          loggedConnection,       // IAgentConnection
@@ -122,7 +122,7 @@ new AgentHostSessionHandler({
 
 The only differences across configurations:
 
-- **`sessionType`** — local uses `agent-host-${provider}`; remote uses `remoteAgentHostSessionTypeId(remoteName, provider)`. This keeps each (host × agent) pair as a distinct session type in the chat sessions registry.
+- **`sessionType`** — local uses `agent-host-${provider}`; remote uses `remoteAgentHostSessionTypeId(remoteName, provider)`. This keeps each (host × agent) pair as a distinct session type in the chat sessions registry. Note: this is the *chat sessions registry* type — distinct from the **Sessions-app `ISession.sessionType`** (which is `agent.provider` itself, e.g. `copilotcli`, so the same agent shares one logical type across hosts). See [agent-host-sessions-providers](./agent-host-sessions-providers.md#session-type-id-vs-resource-scheme).
 - **`connectionAuthority`** — used by file-system and URI services to scope which Agent Host owns a given resource URI. Local resources live under authority `'local'`; remote resources live under the sanitized remote name.
 - **`connection`** — `MessagePortConnection` for local, one of the WebSocket / SSH / tunnel transports for remote.
 
@@ -169,3 +169,4 @@ If you can't place a piece of code in exactly one of these buckets, that's the m
 - **2026-04-19** — `bea3e7e018` — added gotcha: agent-host child process registers only `INativeEnvironmentService`, not the base `IEnvironmentService` token.
 - **2026-04-20** — `d05eca7455` — added "Designing for the spec and the in-tree client, not for theoretical external ones" as a corollary to the cardinal rule. Captures the principle that we do not over-flex APIs to accommodate hypothetical future external callers — the spec is the contract and the in-tree consumer is the design target.
 - **2026-04-20** — `7f8e7e0f0c` — added the `autoApprove` session-config property as a concrete worked example of well-known convention #1, with a pointer to the new [agent-host-auto-approve-picker](./agent-host-auto-approve-picker.md) doc.
+- **2026-04- ` renamed `CopilotAgent.id` from `'copilot'` to `'copilotcli'` (the agent now advertises itself with the same name the UI uses for it). Updated example values in the `IAgentHostSessionHandlerConfig` snippet and clarified that the chat-sessions-registry `sessionType` is distinct from the Sessions-app `ISession.sessionType` (which is `agent.provider` directly, so the same agent shares one logical type across local and remote). See [agent-host-sessions-providers#session-type-id-vs-resource-scheme](./agent-host-sessions-providers.md#session-type-id-vs-resource-scheme).00f882a16c` 20** 
