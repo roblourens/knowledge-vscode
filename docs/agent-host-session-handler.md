@@ -55,6 +55,14 @@ Code that *runs a turn* belongs in the handler. Code that *changes how a turn is
 
 If a behavior could be expressed as a protocol action and reducer change, prefer that — handler-only state tends to drift across local/remote and across multi-client scenarios.
 
+## Request context and client-tool parity
+
+`AgentHostSessionHandler` converts incoming chat request variables to provider attachments in `_convertVariablesToAttachments`. Today that conversion handles basic files, directories, and implicit selection variables. The `IAgentAttachment` type already supports selection text and range, and the Copilot provider forwards those fields to the SDK when present, but the handler currently sends only the selected file path/display name for selections. Richer prompt/reference parity with the extension-host Copilot CLI still needs explicit work here.
+
+The extension-host Copilot CLI has a dedicated prompt resolver (`copilotcliPromptResolver.ts`) that handles more reference kinds: selected text/ranges, diagnostics, prompt files, GitHub PR references, merge-change references, images, ignore filtering, notebook exclusions, and worktree path translation. Agent Host should port the relevant semantics into AHP-friendly attachments or client tools rather than copying the extension's storage/transport details directly.
+
+Client tools are already generic: `_dispatchActiveClient` sends the active client's tool definitions over AHP, and `_beginClientToolInvocation` / `_tryInvokeClientTool` route tool calls back to VS Code. That is the right abstraction for remote/local parity. The current gap is product defaults and exact Copilot CLI parity: the extension-host path ships built-in VS Code tools such as `get_selection`, `get_diagnostics`, `get_vscode_info`, `open_diff`, `close_diff`, and `update_session_name`, while Agent Host currently relies on the `chat.agentHost.clientTools` allowlist and whatever workbench tools are configured.
+
 ## Patterns and gotchas
 
 - **Active-turn reconnect** is the most subtle behavior. If you change how a turn renders, exercise reload-during-turn paths in tests under `agentHostChatContribution.test.ts`.
@@ -115,6 +123,10 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 
 ## Debt & gotchas
 
+- **debt** (2026-04-21, agentHostSessionHandler.ts:_convertVariablesToAttachments) — selection attachments currently send only path/display name even though `IAgentAttachment` supports `text` and `selection`, and the Copilot provider forwards them to the SDK. Populate selected text/range before treating selection parity as complete.
+- **debt** (2026-04-21, agentHostSessionHandler.ts:_convertVariablesToAttachments) — request context parity is much thinner than the extension-host Copilot CLI prompt resolver: diagnostics, image/binary attachments, PR/merge references, ignored-file filtering, notebook exclusions, and worktree path translation need AHP-native equivalents.
+- **debt** (2026-04-21, agentHostSessionHandler.ts:_dispatchActiveClient) — client tools are generic and allowlist-driven, but Agent Host does not yet provide a curated default set equivalent to the extension-host CLI's `get_selection`, `get_diagnostics`, `get_vscode_info`, `open_diff`, `close_diff`, and `update_session_name` tools.
+
 - **gotcha** (2026-04-19, stateToProgressAdapter.ts:rewriteMarkdownLinks + chatContentMarkdownRenderer.ts) — the remote-file link rewrite produces empty-text `<a href="vscode-agent-host://...">` tags on purpose so `renderFileWidgets` can replace them with `InlineAnchorWidget`. This works only if the chat markdown sanitizer augments `allowedLinkSchemes` with `AGENT_HOST_SCHEME`. Drop the scheme from the allowlist (or change the rewrite to keep link text) and the link silently disappears: DOMPurify strips the `href`, `rewriteRenderedLinks` removes the empty `<a>`, and the message renders as bare prefix text. If you add another markdown-typed channel that may carry remote file links, you have to update both sides — see "Remote file links in tool messages" above.
 - **gotcha** (2026-04-19, agentSideEffects.ts:_pendingSubagentEvents) — Inner subagent `tool_start` can arrive before `subagent_started`. Buffer keyed by parent tool call id; clear on both drain *and* `completeSubagentSession` (parent may complete without ever starting the child).
 - **gotcha** (2026-04-19, agentSideEffects.ts:_toolCallAgents) — Don't register inner tool starts (those carrying `parentToolCallId`) in `_toolCallAgents` until drain. The matching `tool_ready` lacks `parentToolCallId` and would route to the wrong session.
@@ -122,6 +134,7 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 
 ## Changelog
 
+- **2026-04-21** — `ad531180d0` — added request-context/client-tool parity section and debt entries for selection payloads, prompt/reference/image gaps, and default VS Code client-tool parity.
 - **2026-04-16** — `6cd94ddc6f` — initial entry. Captures the role of `AgentHostSessionHandler` as the shared local/remote adapter between AHP session state and VS Code chat sessions, including turn dispatch, progress rendering, active-turn reconnect, server-initiated turns, permissions, client tools, file edits, terminals, subagents, auth retries, and customization refs. Drawn from the prior `agent-host-chat-sessions` skill.
 - **2026-04-16** — `6cd94ddc6f` — added `IAgentHostSessionHandlerConfig` example showing the local-vs-remote seam, and cross-referenced the new topology doc.
 - **2026-04-18** — `96ab46a042` — cross-linked to the new agent-host-sessions-providers doc; clarified that the providers share the same refcounted `StateComponents.Session` subscriptions.

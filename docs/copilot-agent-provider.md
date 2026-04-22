@@ -62,6 +62,18 @@ The announcement text is built by the local `buildWorktreeAnnouncementText(branc
 
 The `IAgentDeltaEvent` field is `content`, not `delta` — easy to get wrong because of the event's name.
 
+## Copilot CLI parity gaps relevant to the provider
+
+The Agent Host Copilot provider already owns the local SDK client, models, session lifecycle, session config, worktree creation, shell tools, permissions, customization conversion, and SDK event mapping. When comparing it with the extension-host Copilot CLI implementation, the remaining relevant gaps are mostly around "make the session shippable and diagnosable" rather than core lifecycle.
+
+The most important gap is that `_resolveSessionWorkingDirectory` creates an isolated git worktree and branch, but the provider layer has no equivalent of the extension-host request lifecycle that commits or checkpoints dirty worktree state after a turn. Worktree creation is necessary for selfhosting, but not sufficient for shipping: without a turn-end commit/checkpoint flow, edits can remain only as uncommitted files in the worktree and be invisible to a parent-repo merge or PR flow.
+
+Copilot-specific SDK tool display is also much thinner in `copilotToolDisplay.ts` than in the extension-host CLI's `copilotCLITools.ts`. The Agent Host display helper handles core shell/file/search/web/user/subagent tools, but does not currently normalize or capture specialized Copilot CLI tools such as `exit_plan_mode`, `create_pull_request`, `skill`, or `update_todo`. If those SDK tools are expected in Agent Host sessions, provider-side display/result handling should preserve their structured meaning rather than rendering them as generic tools.
+
+MCP support exists through plugin conversion (`toSdkMcpServers`), but the provider does not currently mirror the extension-host `CopilotCLIMCPHandler` behavior that proxies all VS Code-configured MCP servers through the gateway, adds the built-in GitHub MCP fallback, and remaps custom-agent tool names from friendly names to gateway names. That should be treated as a capability gap; the exact extension HTTP/lock-file transport is not necessarily the right Agent Host shape.
+
+Provider logging is broad (`CopilotAgentSession._subscribeForLogging`), but it is not the same as the extension-host request logger and OTel bridge. For selfhosting investigations, the useful parity target is correlated turn/request/tool/hook/span diagnostics, not necessarily the same extension implementation.
+
 ## Testing Pattern
 
 Focused tests live in `copilotAgent.test.ts`. The SDK client is injected through a narrow protected factory seam because the SDK `CopilotClient` type has private members, which prevents lightweight structural fakes from being assigned to the class type directly.
@@ -123,6 +135,11 @@ For markdown file links, `formatPathAsMarkdownLink()` already produces the `[nam
 
 ## Debt & gotchas
 
+- **debt** (2026-04-21, copilotAgent.ts:_resolveSessionWorkingDirectory) — worktree isolation creates the branch/worktree but does not provide the extension-host CLI's turn-end auto-commit/checkpoint lifecycle. Add provider/protocol-side checkpoint or commit metadata before relying on Agent Host worktree sessions as shippable branches.
+- **debt** (2026-04-21, copilotToolDisplay.ts) — specialized Copilot CLI tools such as `exit_plan_mode`, `create_pull_request`, `skill`, and `update_todo` are not normalized in Agent Host display/result handling. Preserve structured semantics if these SDK tools are expected in Agent Host sessions.
+- **debt** (2026-04-21, copilotPluginConverters.ts:toSdkMcpServers) — plugin MCP conversion exists, but the Agent Host path does not yet mirror extension-host MCP gateway forwarding, built-in GitHub MCP fallback, or custom-agent tool-name remapping. Add an AHP-native bridge rather than copying extension HTTP/lock-file transport directly.
+- **debt** (2026-04-21, copilotAgentSession.ts:_subscribeForLogging) — provider logging is broad but lacks the extension-host request/conversation logger and SDK OTel span bridge. Selfhosting needs correlated turn, tool, hook, and span diagnostics.
+
 - **gotcha** (2026-04-18, copilotToolDisplay.ts:getInvocationMessage/getPastTenseMessage) — display messages with markdown formatting must (a) be wrapped with `md(...)` so they ship as `{ markdown: ... }`, (b) keep the markdown punctuation (backticks, brackets) *outside* the `localize(...)` call so translators can't break it, and (c) wrap interpolated user-controlled strings with `appendEscapedMarkdownInlineCode` for inline-code spans (backslash-escaping backticks does NOT work in CommonMark inline code). A plain `string` return from a `StringOrMarkdown`-typed function renders as literal text.
 - **gotcha** (2026-04-19, copilotAgentSession.ts:handlePermissionRequest) — Copilot SDK write permission requests identify the target via `request.fileName`, NOT `request.path`. Read requests use `request.path`. Mixing them up silently causes auto-approval to miss the target path and fall through to the user-confirmation codepath.
 - **gotcha** (2026-04-19, copilotAgentSession.ts) — ALL callbacks handed to the Copilot SDK must wrap in try/catch + `logService.error()` + rethrow. The SDK silently swallows unhandled callback exceptions and converts them to generic error responses ("Permission denied", "Could not request input") with no logging. Without the wrapper, DI failures and other bugs in callbacks are untraceable.
@@ -148,6 +165,7 @@ For markdown file links, `formatPathAsMarkdownLink()` already produces the `[nam
 
 ## Changelog
 
+- **2026-04-21** — `ad531180d0` — added Copilot CLI parity-gap section and debt entries for worktree commit/checkpoint lifecycle, specialized Copilot CLI tool display, MCP gateway parity, and request/OTel logging.
 - **2026-04-21** — `4da62d3b09` — added gotchas for: (1) `package.json` / `remote/package.json` `@github/copilot` version should track `extensions/copilot/package.json`'s pin; (2) `_refreshModels` swallows ALL throws (not just auth), so the only safety net for SDK schema drift is the new real-SDK `listModels` integration test; (3) extended the rename-audit gotcha to call out `protocol/toolApprovalRealSdk.integrationTest.ts` — env-gated so stale provider ids sit broken indefinitely.
 - **2026-04-21** — `7bc767483b` — added coexistence paragraph to Session Ownership section explaining how the database-existence gate pairs with the extension provider's `getSessionOrigin()` filter. Cross-links to new [agent-host-sessions-providers § Coexistence](./agent-host-sessions-providers.md#coexistence-with-the-extension-host-provider).
 - **2026-04-20** — `d05eca7455` — added "Authentication contract" section documenting that `listSessions` and `_listModels` throw `AHP_AUTH_REQUIRED` via `_ensureClient()` when no token (per AHP `required: true` spec); added gotcha against silently returning `[]` and noted the prior test that pinned the wrong behavior.
