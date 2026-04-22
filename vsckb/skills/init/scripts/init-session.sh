@@ -26,7 +26,7 @@ done
 
 # --- Resolve KNOWLEDGE_REPO from script location -----------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KNOWLEDGE_REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
+KNOWLEDGE_REPO="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
 # --- Resolve VSCODE_REPO + branch from cwd -----------------------------------
 VSCODE_REPO="$(git rev-parse --show-toplevel)"

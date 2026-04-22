@@ -1,5 +1,5 @@
 {
-  "name": "knowledge-vscode",
+  "name": "vsckb",
   "version": "0.1.0",
   "description": "Personal knowledge base for the VS Code agent host subsystem. Skills locate the knowledge repo, plan and implement work with prior context, capture what was learned, and reconcile docs with the current VS Code codebase.",
   "license": "MIT",

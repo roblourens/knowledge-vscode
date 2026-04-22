@@ -55,7 +55,7 @@ Periodically: `reconcile` brings stale docs back in sync with `origin/main`.
 - `.knowledge/index.md` — top-level orientation, list of all docs, conventions.
 - `.knowledge/docs/` — component docs with `Covers:` lines and changelogs.
 - `.knowledge/changes/` — narrative history.
-- The plugin's own `readme.md` — full design rationale.
+- The knowledge repo's root `readme.md` — full design rationale.
 
 ---
 

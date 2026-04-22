@@ -7,58 +7,12 @@ description: "Set up the VS Code agent host knowledge repo for the current sessi
 
 Prepares the VS Code agent host knowledge repo for use in the current session. Other skills in this plugin run this automatically on first use — the user should never be told "run init first."
 
-## Run the script
-
-`init-session.sh` does all the work — branch naming, worktree creation, the `.knowledge/` symlink, and the `.git/info/exclude` line. The script lives next to this skill at `<skill-dir>/scripts/init-session.sh`. Derive `<skill-dir>` from the absolute path of this SKILL.md (the directory containing it).
-
-```sh
-"<skill-dir>/scripts/init-session.sh"
-```
-
-Resolve `KNOWLEDGE_REPO` from the user's VS Code setting if they have one configured; otherwise fall back to the repo this `SKILL.md` ships in (three directories up from this file).
-
-The script prints `key: value` lines on stdout, ending with `status: ...`. Parse the output and react to `status`:
-
-| `status` | exit | What happened | What to do |
-|---|---|---|---|
-| `created` | 0 | Fresh worktree set up. | Continue. |
-| `reused` | 0 | An existing `.knowledge/` from this skill is clean and reusable. | Continue. |
-| `stale-with-work` | 2 | A previous conversation left a worktree with uncommitted changes or unpushed commits. The script refused to touch it. | **If this is a new conversation** (you didn't make those changes), tell the user: "I found a leftover knowledge worktree at `<existing-worktree>` from a prior session — `<existing-dirty-files>` uncommitted file(s), `<existing-commits-ahead>` unpushed commit(s). I'm going to discard it and start fresh." Then re-run with `--force-fresh`. **If this is mid-conversation and the changes are yours**, do **not** re-run with `--force-fresh` — the existing symlink is what your skill should be using. |
-| `conflict` | 3 | `$VSCODE_REPO/.knowledge` exists and isn't ours (real file/dir, or symlink to somewhere unexpected). | Surface the conflict to the user and stop. Don't touch it. |
-
-## Session state — re-derive, don't persist
-
-The skills don't store session state in agent memory. Every skill re-derives what it needs from the filesystem each time it runs:
-
-- `KNOWLEDGE_CHECKOUT` = `"$VSCODE_REPO/.knowledge"` — the symlink path itself. Use it directly; don't `realpath` it. Filesystem ops, `git -C "$KNOWLEDGE_CHECKOUT" ...`, and reading/writing files under it all work transparently through the symlink. If the symlink is missing or broken (`[ ! -d "$KNOWLEDGE_CHECKOUT/" ]`), run `init` again.
-- `KNOWLEDGE_BRANCH` = `git -C "$KNOWLEDGE_CHECKOUT" symbolic-ref --short HEAD`.
-- `VSCODE_REPO`, `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
-- `SESSION_SLUG` (when needed) is the single subfolder under `$KNOWLEDGE_CHECKOUT/plan/` for this session. If there's exactly one, that's it; if there are zero, the skill that needs one (`plan`) creates it; if there are multiple, ask the user which session they're working in.
-
-This keeps the system stateless from the agent's perspective and avoids the agent-memory dependency.
-
-## Orienting
-
-Read `$KNOWLEDGE_CHECKOUT/index.md` for context on what's in the knowledge base. That's it — you'll pull in specific docs as the work demands.
-
-## Output
-
-Tell the user briefly that `.knowledge/` is set up in the VS Code workspace. They don't need the worktree path or branch name unless something went wrong (`stale-with-work` recreate or `conflict`) — in those cases, surface the relevant detail.
----
-name: init
-description: "Set up the VS Code agent host knowledge repo for the current session. Use when starting work that touches the agent host subsystem, or when any other skill in this plugin needs the repo and it hasn't been initialized yet. Triggers include 'init knowledge', 'set up knowledge repo', or any first invocation of plan / implement / finalize / reconcile in this session."
----
-
-# Skill: init
-
-Prepares the VS Code agent host knowledge repo for use in the current session. Other skills in this plugin run this automatically on first use — the user should never be told "run init first."
-
 ## Resolving the knowledge repo path
 
 Resolve `KNOWLEDGE_REPO` (the absolute path to the knowledge repo) in this order:
 
 1. The VS Code setting that points at the knowledge repo, if the user has configured one. (Setting name is user-managed; check workspace and user settings for any setting whose value is an absolute path containing this skill's parent directories.)
-2. Fall back to the repo this skill ships in: this `SKILL.md` lives at `<KNOWLEDGE_REPO>/skills/init/SKILL.md`, so `KNOWLEDGE_REPO` is the directory three levels up from this file.
+2. Fall back to the repo this skill ships in: this `SKILL.md` lives at `<KNOWLEDGE_REPO>/vsckb/skills/init/SKILL.md`, so `KNOWLEDGE_REPO` is the directory three levels up from this file.
 
 If neither resolves, ask the user where the knowledge repo lives and stop.
 

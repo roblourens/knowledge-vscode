@@ -8,7 +8,7 @@ This repo *is* the knowledge repo. It is not checked into the VS Code repo and l
 
 For editing convenience, `init` also symlinks the session's knowledge checkout into the VS Code worktree as `.knowledge/`, and adds `.knowledge` to the VS Code repo's `.git/info/exclude` so it never appears in upstream commits. The symlink is purely a UX convenience — the skills themselves resolve the knowledge repo independently of it, and an agent or user can edit either through `.knowledge/` or directly in the knowledge checkout.
 
-The system has two parts: a **knowledge repo** (this repo) containing docs, change logs, and task guidance, and a **VS Code agent plugin** (also in this repo, in the same Team Kit-style agent plugin format used by `vscode-team-kit`) that ships a set of skills (`init`, `explore`, `plan`, `implement`, `finalize`, `land`, `reconcile`, `help`) which manage the lifecycle of locating the repo, planning, implementing, documenting, publishing, and validating. Installing the plugin registers the skills under the plugin's namespace in VS Code (e.g. `<plugin>:plan`, `<plugin>:implement`).
+The system has two parts: a **knowledge repo** (this repo) containing docs, change logs, and task guidance, and the **`vsckb` VS Code agent plugin** (under `vsckb/`, in the same Team Kit-style agent plugin format used by `vscode-team-kit`) that ships a set of skills (`init`, `explore`, `plan`, `implement`, `finalize`, `land`, `reconcile`, `help`) which manage the lifecycle of locating the repo, planning, implementing, documenting, publishing, and validating. Installing the plugin registers the skills under the `vsckb` namespace in VS Code (e.g. `vsckb:plan`, `vsckb:implement`).
 
 ---
 
@@ -17,13 +17,19 @@ The system has two parts: a **knowledge repo** (this repo) containing docs, chan
 The knowledge repo is this repo. Its structure:
 
 ```
-vscode-knowledge/
+knowledge-vscode/
 ├── index.md
+├── marketplace.json
 ├── docs/
 │   ├── agent-session-lifecycle.md
 │   ├── state-sync-protocol.md
 │   ├── chat-participants.md
 │   └── ...
+├── vsckb/
+│   ├── .plugin/
+│   │   └── plugin.json
+│   └── skills/
+│       └── ...
 ├── changes/
 │   ├── 2026-04-15-session-reconnect/
 │   │   └── summary.md
@@ -97,7 +103,7 @@ Ephemeral planning artifacts for the current session. Task lists, implementation
 
 ## Skills
 
-These skills ship as part of a VS Code agent plugin in this repo, in the same Team Kit-style format used by `vscode-team-kit`. Installing the plugin registers them under the plugin's namespace, so they show up grouped in VS Code as `<plugin>:init`, `<plugin>:plan`, etc. They are invoked by the agent (and by the user when they want to drive the workflow explicitly).
+These skills ship as part of the `vsckb` VS Code agent plugin in this repo, in the same Team Kit-style format used by `vscode-team-kit`. The repo-level `marketplace.json` points to `./vsckb/` as the plugin root. Installing the plugin registers the skills under the `vsckb` namespace, so they show up grouped in VS Code as `vsckb:init`, `vsckb:plan`, etc. They are invoked by the agent (and by the user when they want to drive the workflow explicitly).
 
 The skills locate the knowledge repo from a user-managed VS Code setting. The setting itself (name, scope, default) is left for the user to wire up — the skills just read it.
 
