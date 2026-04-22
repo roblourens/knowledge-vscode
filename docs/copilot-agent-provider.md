@@ -1,6 +1,6 @@
 # Copilot Agent Provider
 
-_Covers: src/vs/platform/agentHost/node/copilot/copilotAgent.ts, src/vs/platform/agentHost/node/copilot/copilotAgentSession.ts, src/vs/platform/agentHost/node/copilot/copilotShellTools.ts, src/vs/platform/agentHost/node/copilot/copilotToolDisplay.ts, src/vs/platform/agentHost/test/node/copilotAgent.test.ts, src/vs/platform/agentHost/test/node/copilotAgentSession.test.ts, src/vs/platform/agentHost/test/node/copilotShellTools.test.ts_
+_Covers: src/vs/platform/agentHost/node/copilot/copilotAgent.ts, src/vs/platform/agentHost/node/copilot/copilotAgentSession.ts, src/vs/platform/agentHost/node/copilot/copilotShellTools.ts, src/vs/platform/agentHost/node/copilot/copilotToolDisplay.ts, src/vs/platform/agentHost/node/copilot/mapSessionEvents.ts, src/vs/platform/agentHost/common/commandLineHelpers.ts, src/vs/platform/agentHost/test/node/copilotAgent.test.ts, src/vs/platform/agentHost/test/node/copilotAgentSession.test.ts, src/vs/platform/agentHost/test/node/copilotShellTools.test.ts, src/vs/platform/agentHost/test/node/copilotToolDisplay.test.ts, src/vs/platform/agentHost/test/node/mapSessionEvents.test.ts, src/vs/platform/agentHost/test/common/commandLineHelpers.test.ts_
 
 `CopilotAgent` is the local Agent Host provider backed by the Copilot SDK. It is provider-specific code under `src/vs/platform/agentHost/node/copilot/`, below the generic AHP server layer and above the SDK runtime. Generic aggregation (`AgentService`) and UI consumers should receive already-filtered Copilot session metadata from this provider.
 
@@ -133,12 +133,32 @@ md(localize('key', "Searching for {0}", appendEscapedMarkdownInlineCode(truncate
 
 For markdown file links, `formatPathAsMarkdownLink()` already produces the `[name](uri)` form — those still go through `md(...)`.
 
+## Shell command display rewriting (`commandLineHelpers.ts`)
+
+Shell commands the model emits often start with a redundant `cd <workingDirectory> && …` prefix even though the SDK already runs the tool in that directory. The agent host strips that prefix at the AHP boundary so every client sees the simplified command (the SDK / PTY still runs the original verbatim — only display is rewritten).
+
+`src/vs/platform/agentHost/common/commandLineHelpers.ts` exports two helpers:
+
+- **`extractCdPrefix(commandLine, isPowerShell)`** — regex-based parse of `cd <dir> && …`, plus the PowerShell variants `cd /d <dir>; …`, `Set-Location <dir>; …`, `Set-Location -Path <dir> && …`. Returns `{ directory, command }` or `undefined`. Surrounding double-quotes around `<dir>` are stripped.
+- **`stripRedundantCdPrefix(toolName, parameters, workingDirectory)`** — the policy wrapper. Returns `boolean` and **mutates** `parameters.command` in place when (a) `toolName` is `'bash'` or `'powershell'`, (b) the prefix matches, and (c) the extracted directory equals `workingDirectory`.
+
+**Three independent display paths** all call `stripRedundantCdPrefix`. Adding a new place that surfaces shell command text to AHP clients should call it too:
+
+1. **History replay** — `mapSessionEvents.ts`'s `tool.execution_start` branch. Mutates `parameters.command`, then re-stringifies into `toolArgs` and `toolInput` so both raw and display forms stay in sync.
+2. **Live tool start** — `copilotAgentSession.ts` `wrapper.onToolStart` handler. Mutates the parsed `parameters` object stored in `_activeToolCalls`, then re-stringifies `toolArgs` if the rewrite happened. Because `getPastTenseMessage` in `onToolComplete` looks up `_activeToolCalls.get(callId)?.parameters`, the past-tense message automatically reflects the rewritten command — keep that aliasing intact.
+3. **Permission requests** — `copilotToolDisplay.ts` `getPermissionDisplay`. Both the `'shell'` kind (synthesizes a `{ command: fullCommandText }` parameters object, then re-extracts `cleanedCommand`) and the `'custom-tool'` kind (mutates `request.args` directly when the SDK tool is a shell tool).
+
+Path comparison normalizes separators by routing both sides through `URI.file()` (after trimming trailing separators) and comparing via `extUriBiasedIgnorePathCase.isEqual`. Don't fall back to raw `fsPath` string comparison: on Windows `URI.file('/repo/project').fsPath` is `\repo\project` while the model often emits `cd /repo/project && …`, which silently slips past a string compare.
+
+The `pwsh &&`→`;` rewriting and the sandbox/background-detach behavior the workbench has are out of scope here. This helper only handles the redundant `cd` prefix.
+
 ## Debt & gotchas
 
 - **debt** (2026-04-21, copilotAgent.ts:_resolveSessionWorkingDirectory) — worktree isolation creates the branch/worktree but does not provide the extension-host CLI's turn-end auto-commit/checkpoint lifecycle. Add provider/protocol-side checkpoint or commit metadata before relying on Agent Host worktree sessions as shippable branches.
 - **debt** (2026-04-21, copilotToolDisplay.ts) — specialized Copilot CLI tools such as `exit_plan_mode`, `create_pull_request`, `skill`, and `update_todo` are not normalized in Agent Host display/result handling. Preserve structured semantics if these SDK tools are expected in Agent Host sessions.
 - **debt** (2026-04-21, copilotPluginConverters.ts:toSdkMcpServers) — plugin MCP conversion exists, but the Agent Host path does not yet mirror extension-host MCP gateway forwarding, built-in GitHub MCP fallback, or custom-agent tool-name remapping. Add an AHP-native bridge rather than copying extension HTTP/lock-file transport directly.
 - **debt** (2026-04-21, copilotAgentSession.ts:_subscribeForLogging) — provider logging is broad but lacks the extension-host request/conversation logger and SDK OTel span bridge. Selfhosting needs correlated turn, tool, hook, and span diagnostics.
+- **debt** (2026-04-22, commandLineHelpers.ts:extractCdPrefix) — the `cd`-prefix extraction regex now exists in **three** copies: agent host (`commandLineHelpers.ts`), workbench (`runInTerminalHelpers.ts`), and the extension (`copilotCLITools.ts`). The agent-host version is the most complete (it includes the quoted-directory variant and PowerShell `Set-Location` / `cd /d` forms); the workbench one is missing the quoted variant. Worth a future consolidation pass into a shared `vs/base/common/` (or `vs/platform/`) helper that all three import.
 
 - **gotcha** (2026-04-18, copilotToolDisplay.ts:getInvocationMessage/getPastTenseMessage) — display messages with markdown formatting must (a) be wrapped with `md(...)` so they ship as `{ markdown: ... }`, (b) keep the markdown punctuation (backticks, brackets) *outside* the `localize(...)` call so translators can't break it, and (c) wrap interpolated user-controlled strings with `appendEscapedMarkdownInlineCode` for inline-code spans (backslash-escaping backticks does NOT work in CommonMark inline code). A plain `string` return from a `StringOrMarkdown`-typed function renders as literal text.
 - **gotcha** (2026-04-19, copilotAgentSession.ts:handlePermissionRequest) — Copilot SDK write permission requests identify the target via `request.fileName`, NOT `request.path`. Read requests use `request.path`. Mixing them up silently causes auto-approval to miss the target path and fall through to the user-confirmation codepath.
@@ -164,6 +184,9 @@ For markdown file links, `formatPathAsMarkdownLink()` already produces the `[nam
 
 	The next time someone reads the extension's plan-mode code (`copilotcliSession.ts` + `exitPlanModeHandler.ts`) and tries to port it to `copilotAgentSession.ts`, they will hit this wall — the missing surface area is the reason `planning-mode session-state writes are auto-approved in default mode` in `protocol/toolApprovalRealSdk.integrationTest.ts` is currently `test.skip`'d. Update this entry (and unskip the test) when the public SDK adds these surfaces.
 
+- **gotcha** (2026-04-22, commandLineHelpers.ts:stripRedundantCdPrefix) — shell command text reaches AHP clients through **three independent paths**: history replay (`mapSessionEvents.ts` `tool.execution_start`), live tool start (`copilotAgentSession.ts` `wrapper.onToolStart`), and permission requests (`copilotToolDisplay.ts` `getPermissionDisplay` for both `'shell'` and `'custom-tool'`). When adding a new shell-command rewrite (or any other "make this command look nicer to clients" transform), call the shared helper from all three paths or the rewrite will look correct on session reload but be missing during live execution / permission prompts. The first version of the cd-prefix strip only patched history replay; the live paths surfaced as a "works after reopen, broken in the moment" bug.
+- **gotcha** (2026-04-22, commandLineHelpers.ts:stripRedundantCdPrefix) — comparing a path extracted from a model-emitted command line (e.g. the `<dir>` from `cd <dir> && …`) against the session `workingDirectory: URI` MUST go through `URI.file(...)` + `extUriBiasedIgnorePathCase.isEqual` (with trailing separators trimmed off both sides), not raw `fsPath` string comparison. On Windows `URI.file('/repo/project').fsPath` is `\repo\project`, but the model commonly emits forward-slash paths (`cd /repo/project && …`); a string compare silently misses every match and the regression only surfaces on Windows CI. The same applies to any other place that extracts a path from free-form command-line text.
+
 ## Related
 
 - [agent-host-topology](./agent-host-topology.md) — where provider-level listing work fits in the Agent Host architecture.
@@ -172,6 +195,7 @@ For markdown file links, `formatPathAsMarkdownLink()` already produces the `[nam
 
 ## Changelog
 
+- **2026-04-22** — `357bfe70c9` — added `commandLineHelpers.ts` + `mapSessionEvents.ts` to Covers; documented the new `extractCdPrefix` / `stripRedundantCdPrefix` helpers and the **three independent shell-command display paths** (history replay, live `tool_start`, permission requests) that all rewrite the redundant `cd <workingDirectory>` prefix at the AHP boundary; added two gotchas (three-path coverage, `URI.file` + `extUriBiasedIgnorePathCase.isEqual` for cross-platform path comparison) and one debt entry (three copies of the `extractCdPrefix` regex now live in workbench / extension / agent host). See [changes/2026-04-22-agent-host-cd-cleanup](../changes/2026-04-22-agent-host-cd-cleanup/summary.md).
 - **2026-04-22** — `a92cbe70e9` — added gotcha documenting the public vs private SDK split (`@github/copilot-sdk` vs `@github/copilot/sdk`). The Agent Host uses the public SDK; the Copilot CLI extension uses the private one. Concrete differences observed: plan-mode entry (`agentMode` on `SendOptions`), plan-mode response (`Session.respondToExitPlanMode`), and the `onExitPlanMode` callback wiring. This is the load-bearing reason `planning-mode session-state writes are auto-approved in default mode` is currently `test.skip`'d in `toolApprovalRealSdk.integrationTest.ts`. Cross-referenced from the testing doc.
 - **2026-04-22** — `d6e5c5227d` — bumped `@github/copilot` from `^1.0.28` to `^1.0.34` (matches `extensions/copilot`); added `ICopilotModelInfo` wrapper interface with optional `capabilities`/`limits`/`supports`/`max_context_window_tokens`, made `IAgentModelInfo.maxContextWindow` optional, and switched `_listModels` to `.map` so the synthetic `auto` model (which ships with `capabilities: {}`) surfaces with `maxContextWindow: undefined` instead of throwing or being dropped. Updated the related gotcha and added a new one for the wrapper-interface pattern; updated `testing.md` § 3 example accordingly.
 - **2026-04-21** — `ad531180d0` — added Copilot CLI parity-gap section and debt entries for worktree commit/checkpoint lifecycle, specialized Copilot CLI tool display, MCP gateway parity, and request/OTel logging.
