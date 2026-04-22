@@ -67,7 +67,7 @@ Client tools are already generic: `_dispatchActiveClient` sends the active clien
 
 - **Active-turn reconnect** is the most subtle behavior. If you change how a turn renders, exercise reload-during-turn paths in tests under `agentHostChatContribution.test.ts`.
 - **The same handler instance does not span sessions.** Per-session state lives on the handler instance for that session.
-- **Disposables register at construction time.** Don't add manual `dispose()` — use `this._register(...)`.
+- **Disposables register at construction time.** Use `this._register(...)` for normal cleanup. The one deliberate exception in this file is `AgentHostChatSession.dispose()`, which fires `onWillDispose` before the registered disposables are torn down so `ContributedChatSessionData` can evict the session from chat-session caches before the emitter itself is disposed.
 - **Preserve the `IAgentConnection` abstraction.** Reach for `IAgentHostService` only when you need a local-lifecycle API (restart, etc.).
 - **Customization refs flow through the protocol.** Don't piggyback on workbench-side state to communicate customization changes to the server; use `ISessionActiveClient` and customization actions.
 
@@ -131,6 +131,7 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 - **gotcha** (2026-04-19, agentSideEffects.ts:_pendingSubagentEvents) — Inner subagent `tool_start` can arrive before `subagent_started`. Buffer keyed by parent tool call id; clear on both drain *and* `completeSubagentSession` (parent may complete without ever starting the child).
 - **gotcha** (2026-04-19, agentSideEffects.ts:_toolCallAgents) — Don't register inner tool starts (those carrying `parentToolCallId`) in `_toolCallAgents` until drain. The matching `tool_ready` lacks `parentToolCallId` and would route to the wrong session.
 - **gotcha** (2026-04-19, chatSubagentContentPart.ts) — Update `description` and `agentName` independently in the autorun. Gating both on a single flag drops the late agent name and the UI falls back to "subAgent".
+- **gotcha** (2026-04-21, agentHostSessionHandler.ts:AgentHostChatSession.dispose) — `onWillDispose` must fire before `super.dispose()`. Firing it through `this._register(toDisposable(...))` runs too late because registered disposables are already being disposed; listeners like `ContributedChatSessionData` then miss the chance to evict the session before later lookups and messages can route to stale state.
 
 ## Changelog
 
@@ -140,4 +141,5 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 - **2026-04-18** — `96ab46a042` — cross-linked to the new agent-host-sessions-providers doc; clarified that the providers share the same refcounted `StateComponents.Session` subscriptions.
 - **2026-04-19** — `b708764819` — added a "Remote file links in tool messages" section covering `rewriteMarkdownLinks` in `stateToProgressAdapter.ts`, the deliberate empty-text rewrite, and its dependency on `ChatContentMarkdownRenderer` augmenting `allowedLinkSchemes` with `AGENT_HOST_SCHEME`; added a gotcha capturing the silent-failure mode if the two sides drift.
 - **2026-04-19** — `2935e7d695` — added "Subagent rendering" section covering buffering, deferred `_toolCallAgents` registration, independent `description`/`agentName` updates in `chatSubagentContentPart.ts`, and parent-without-child cleanup. Cross-linked the new testing doc and added subagent-related test references.
-- **2026-04- ` updated the example `provider:` value in the `IAgentHostSessionHandlerConfig` snippet from `'copilot'` to `'copilotcli'` (`CopilotAgent.id` rename).00f882a16c` 20** 
+- **2026-04-20** — `00f882a16c` — updated the example `provider:` value in the `IAgentHostSessionHandlerConfig` snippet from `'copilot'` to `'copilotcli'` (`CopilotAgent.id` rename).
+- **2026-04-21** — `ad531180d0` — reconciliation: documented the `AgentHostChatSession.dispose()` ordering fix from `cf0709667ed`; the merge commit in the same range did not change handler concepts beyond that fix.

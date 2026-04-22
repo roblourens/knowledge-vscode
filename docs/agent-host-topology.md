@@ -1,6 +1,6 @@
 # Agent Host Topology and Protocol Philosophy
 
-_Covers: src/vs/platform/agentHost/, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostChatContribution.ts, src/vs/sessions/contrib/remoteAgentHost/_
+_Covers: src/vs/platform/agentHost/, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostChatContribution.ts, src/vs/sessions/contrib/remoteAgentHost/, src/vs/sessions/contrib/sessions/browser/views/sessionsList.ts, src/vs/sessions/contrib/chat/browser/scopedWorkspacePicker.ts_
 
 This is the **orientation doc**. It answers three questions that come up at the start of every agent-host task:
 
@@ -101,6 +101,12 @@ So shared agent-host code lives under `vs/workbench` (or `vs/platform`), and the
 
 VS Code (the IDE) gets configuration A only. The Agents app gets B and any number of C. There is no "VS Code + remote agent host" configuration today.
 
+### Remote host scoping in the Agents app
+
+When the Agents app runs in web with remote agent hosts, the active host is also a piece of app chrome, not protocol state. `AgentHostFilterService` (`src/vs/sessions/contrib/remoteAgentHost/browser/agentHostFilterService.ts`) watches registered remote `IAgentHostSessionsProvider`s, tracks their connection statuses, persists the selected provider id, and exposes reconnect/disconnect commands. `HostFilterActionViewItem` renders that state as the titlebar host dropdown.
+
+The selected provider id scopes Agents-app surfaces that need a single host context: `sessionsList.ts` filters the sessions list to the selected provider, and `scopedWorkspacePicker.ts` filters workspace choices to the same provider. This is deliberately above `IAgentConnection`: the protocol still sees independent remote hosts, while the app decides which host the user is currently looking at.
+
 ### The shared seam: `IAgentConnection` and `AgentHostSessionHandler`
 
 What lets all three configurations share code is that everything above the wire is written against `IAgentConnection` (in `src/vs/platform/agentHost/common/agentService.ts`). Local and remote both satisfy it; the handler doesn't know which it has.
@@ -146,7 +152,7 @@ The decision tree, in order:
 2. **Is it a new well-known convention** (property name, tool kind)? → Document it in the agent-host-protocol repo's conventions section; implement the recognition in the relevant VS Code adapter (the renderer for tool kinds; the appropriate UI for config property names). Don't put the well-known names into the protocol's TypeScript types.
 3. **Does it run a turn or render session state?** → `AgentHostSessionHandler` (works in all three configurations). See [agent-host-session-handler](./agent-host-session-handler.md).
 4. **Is it about *which* agents/sessions exist or how they're listed?** → Start at the provider/listing owner. SDK-backed local agents, for example, should filter or adopt sessions in the provider (`CopilotAgent.listSessions`) before generic `AgentService` aggregation or UI providers see them. Registration/list UI belongs in a `*Contribution` (`AgentHostContribution` for local; `RemoteAgentHostContribution` for remote) and a `*SessionsProvider` (Agents app only).
-5. **Is it Agents-app-only chrome** (sidebar, sessions view, titlebar widget)? → `src/vs/sessions/contrib/`.
+5. **Is it Agents-app-only chrome** (sidebar, sessions view, titlebar host filter)? → `src/vs/sessions/contrib/`.
 6. **Is it local-only lifecycle** (restart, port wiring, dev mode)? → `IAgentHostService` and friends, *not* the handler.
 
 If you can't place a piece of code in exactly one of these buckets, that's the moment to pause and re-read this doc — there's almost always a layering mistake hiding in the ambiguity.
@@ -171,3 +177,4 @@ If you can't place a piece of code in exactly one of these buckets, that's the m
 - **2026-04-20** — `7f8e7e0f0c` — added the `autoApprove` session-config property as a concrete worked example of well-known convention #1, with a pointer to the new [agent-host-auto-approve-picker](./agent-host-auto-approve-picker.md) doc.
 - **2026-04-20** — `00f882a16c` — renamed `CopilotAgent.id` from `'copilot'` to `'copilotcli'` (the agent now advertises itself with the same name the UI uses for it). Updated example values in the `IAgentHostSessionHandlerConfig` snippet and clarified that the chat-sessions-registry `sessionType` is distinct from the Sessions-app `ISession.sessionType` (which is `agent.provider` directly, so the same agent shares one logical type across local and remote). See [agent-host-sessions-providers#session-type-id-vs-resource-scheme](./agent-host-sessions-providers.md#session-type-id-vs-resource-scheme).
 - **2026-04-18** — `73bca3fa35` — reconciliation: no doc changes. `6f22a555943` (session-config restore) is already covered at finer grain by `agent-host-session-handler.md` and `agent-host-sessions-providers.md`; `e831da2ef96` flipped the `RemoteAgentHostsEnabledSettingId` and `AgentHostIpcLoggingSettingId` defaults from `=== 'insider'` / `false` to `!== 'stable'` — setting-default tweak that doesn't affect topology-level concepts.
+- **2026-04-21** — `ad531180d0` — reconciliation: added the Agents-app remote host filter/scoping layer from `04d051144b0`; `a1abedfea06`, `0a84983bc1e`, `6994450cd36`, and `2e33f3dc7b3` touched agent-host implementation details already covered by narrower docs or not relevant to topology.

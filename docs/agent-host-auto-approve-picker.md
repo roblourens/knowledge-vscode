@@ -13,7 +13,7 @@ There are two picker widgets in the tree, each scoped to one rendering context. 
 | `PermissionPicker` | `src/vs/sessions/contrib/copilotChatSessions/browser/permissionPicker.ts` | The Agents app's **new-chat page** (`Menus.NewSessionControl`) | Sessions layer |
 | `PermissionPickerActionItem` | `src/vs/workbench/contrib/chat/browser/widget/input/permissionPickerActionItem.ts` | The running **chat input toolbar** (`MenuId.ChatInputSecondary`) — both VS Code chat and the Agents app's running session | Workbench layer |
 
-Both widgets accept the **same delegate interface** (structurally compatible, defined separately in each layer with the matching field names `currentPermissionLevel`, `setPermissionLevel`, optional `isApplicable`). That means a single `AgentHostPermissionPickerDelegate` can drive both — which is what we do for agent-host sessions.
+Both widgets accept delegate interfaces that are **structurally compatible for the shared permission-level fields** (defined separately in each layer with the matching field names `currentPermissionLevel`, `setPermissionLevel`, optional `isApplicable`). That means a single `AgentHostPermissionPickerDelegate` can drive both — which is what we do for agent-host sessions. The workbench `PermissionPickerActionItem` also has optional extension-contributed permission callbacks (`getExtensionPermissions` / `setExtensionPermission`) used by other chat providers; the agent-host delegate intentionally does not implement those because its contract is the well-known AHP `autoApprove` value.
 
 > **Why not collapse to one widget?** The two contexts have different sizing/spacing rules, different ancestor CSS chains (`.new-chat-in-session …` vs `.interactive-session .chat-secondary-toolbar …`), and the workbench widget already had `IStorageService`-backed warning suppression that the sessions widget doesn't need. The user explicitly accepted the duplication; the dedup that mattered was the **picker logic + delegate**, not the DOM.
 
@@ -37,7 +37,7 @@ There are three concrete delegates today:
 
 - `CopilotPermissionPickerDelegate` (sessions layer, in `permissionPicker.ts`) — for the Copilot-CLI new-chat page. Just a setter; the picker reads its own initial level from `chat.permissions.default` configuration.
 - `AgentHostPermissionPickerDelegate` (`sessions/contrib/chat/browser/agentHost/agentHostPermissionPickerDelegate.ts`) — used by **both** widgets when the active session is an agent-host session. Backed by `provider.getSessionConfig(sessionId).values.autoApprove`, with reactivity wired through `provider.onDidChangeSessionConfig` and `sessionsManagementService.activeSession`.
-- (workbench callers in chat input use the existing `PermissionPickerActionItem` directly with their own delegate logic — out of scope here.)
+- Workbench callers in chat input use the existing `PermissionPickerActionItem` directly with their own delegate logic, including optional extension-contributed permission groups — out of scope here except that constructor/delegate-shape changes can still affect `AgentHostPermissionPickerActionItem`.
 
 ## The well-known `autoApprove` schema
 
@@ -83,6 +83,7 @@ The tests use a fake provider and exercise the delegate in isolation. The widget
 
 - A change to the well-known schema or the recognition predicate → `agentHost/agentHostPermissionPickerDelegate.ts` (and the test file).
 - A change to **how either widget renders** (label, icon, dropdown contents, warning dialog, "Learn more" link) → the widget file itself. The two widgets diverged on purpose; consider whether a fix needs to land in both.
+- A change to workbench-only extension-contributed permission groups → `PermissionPickerActionItem` and the contributing provider delegate. Agent-host `autoApprove` should continue to flow through `AgentHostPermissionPickerDelegate` unless the AHP session-config convention itself changes.
 - A change to the menu wiring (which factory registers for which menu) → `agentHostSessionConfigPicker.ts`.
 - The font/size/spacing of the new-chat-page picker → CSS rules under `.new-chat-in-session …` in `src/vs/sessions/contrib/chat/browser/media/newChatInSession.css`. The chat input toolbar's picker inherits the workbench `.chat-input-picker-item` styles; that's the right place for any toolbar-specific tweaks.
 - Any change to `PermissionPickerActionItem`'s constructor signature (e.g. an added injected service) cascades to `AgentHostPermissionPickerActionItem`, which has to forward the new parameter explicitly to `super()`.
@@ -102,3 +103,4 @@ The tests use a fake provider and exercise the delegate in isolation. The widget
 ## Changelog
 
 - **2026-04-20** — `7f8e7e0f0c` — initial entry. Captures the two-widget split (`PermissionPicker` for `NewSessionControl`, `PermissionPickerActionItem` for `ChatInputSecondary`), the shared `AgentHostPermissionPickerDelegate`, the well-known `autoApprove` schema convention and recognition predicate, the fallback to the generic per-property picker for non-conforming agents, and the reactive-visibility pattern needed for action-view-item factories.
+- **2026-04-21** — `ad531180d0` — reconciliation: updated delegate-shape notes after `9a5b0119f0c` added workbench-only extension-contributed permission groups to `PermissionPickerActionItem`; `d844c098294` added tap handling to the sessions picker but did not change the agent-host architecture.
