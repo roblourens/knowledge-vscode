@@ -134,6 +134,22 @@ The only differences across configurations:
 
 Anything that branches on local-vs-remote *inside* the handler is a smell — push it down to the connection or up to the contribution that knows which environment it's in.
 
+### Client-side authentication flow
+
+Each `*Contribution` class (`AgentHostContribution` for local, `RemoteAgentHostContribution` for remote) drives the `authenticate` RPC toward the connected agent host whenever auth state changes. There are **three re-auth triggers**:
+
+1. **`rootState.onDidChange`** — fires whenever a new snapshot, optimistic write, reconcile, or `applyAction` lands (i.e., on every protocol action). This is the source of the `[Copilot] Auth token unchanged` log spam if client-side dedupe is absent.
+2. **`IAuthenticationService.onDidChangeSessions`** — fires for *any* auth provider, not just GitHub. A Google or Microsoft sign-in would also trigger a Copilot re-auth.
+3. **`IAuthenticationService.onDidChangeDefaultAccount`** — narrowed to GitHub by the subscription filter; fires when the user's active GitHub account changes.
+
+The `AgentHostAuthTokenCache` class (`agentHostAuth.ts`) provides per-resource token dedupe: `updateAndIsChanged(resource, token)` returns `false` if the token is unchanged, and `clear(resource?)` evicts one entry or the whole cache. The `_authenticateWithServer` / `_authenticateWithConnection` methods call `updateAndIsChanged` first; if unchanged they return early.
+
+**Cache lifecycle rules** (all three must hold):
+
+- **Seed the cache *after* the RPC, not before.** If `authenticate()` throws, call `cache.clear(resource)` so the next attempt is not suppressed.
+- **Clear per-resource on RPC failure.** A failed `authenticate` should not leave a stale "seen this token" entry.
+- **Clear the whole cache on `onAgentHostStart`.** The local agent host process can die and restart; its in-memory auth state is erased. The cache must be invalidated so the next `_authenticateWithServer` call re-sends the token even though it is numerically unchanged.
+
 ### Lifecycle controls live separately from `IAgentConnection`
 
 `IAgentConnection` is the protocol surface (initialize, subscribe, dispatch, etc.). It is not where you ask the host to *restart* or where you start a WebSocket server. Those live on:
@@ -166,12 +182,15 @@ If you can't place a piece of code in exactly one of these buckets, that's the m
 
 ## Debt & gotchas
 
+- **gotcha** (2026-04-22, agentHostChatContribution.ts:_authenticateWithServer / remoteAgentHost.contribution.ts:_authenticateWithConnection) — `RootStateSubscription.onDidChange` fires on **every** applied action (snapshot, optimistic, reconcile, applyAction), not only when `protectedResources` changes. Any handler wired to `rootState.onDidChange` that issues a network call or expensive work must dedupe that work on its own — never assume the event fires only on meaningful value changes.
+- **gotcha** (2026-04-22, agentHostAuth.ts:AgentHostAuthTokenCache) — the token cache must be seeded **after** the `authenticate()` RPC succeeds, never before. If seeded before, a transient RPC failure poisons the cache entry and suppresses all future retries. On any throw, call `cache.clear(resource)` to evict the entry. Additionally, the whole cache must be cleared on `onAgentHostStart` because the agent host process can restart and lose its in-memory auth state even while the client token is numerically unchanged.
 - **gotcha** (2026-04-19, agentHostMain.ts / agentHostServerMain.ts) — the agent-host child process registers ONLY `INativeEnvironmentService`, not `IEnvironmentService` (the base token). All consumers in the child process use the native token. The parent-process starter (`nodeAgentHostStarter.ts`) runs in the main Electron process's DI container and does use `IEnvironmentService`, but that's a different container — don't confuse the two. Other VS Code processes may register both tokens; the agent host is native-only.
 - **gotcha** (2026-04-22, RemoteAgentHostService.IConnectionEntry.store) — the per-entry `DisposableStore` on each connection entry is THE entry-lifetime ownership boundary. Anything that must be torn down when the user clicks "Remove Remote", when config-driven reconciliation drops an entry, or when the service itself is disposed, MUST be registered there. The `addManagedConnection({ ... }, protocolClient, transportDisposable?)` API is how the SSH/tunnel renderers hand transport-level cleanup into that store. New entry-scoped resources should follow the same pattern — do NOT register them on the renderer service itself, or they'll outlive the entry.
 - **gotcha** (2026-04-22, *RelayTransport.dispose) — relay-transport `dispose()` implementations are responsible for telling the shared-process side to close the underlying connection. `TunnelRelayTransport.dispose()` and `TunnelConnectionTransport.dispose()` both do this; `SSHRelayTransport.dispose()` historically did NOT (it only removed IPC listeners), which is why removing an SSH-backed remote leaked the tunnel until the SSH renderer started passing its own `transportDisposable` that calls `_mainService.disconnect(connectionId)`. If you add a new relay transport, make sure its `dispose()` either closes the shared-process connection itself or that the renderer that owns it passes a `transportDisposable` that does.
 
 ## Changelog
 
+- **2026-04-22** — `67763f6b5e` — added "Client-side authentication flow" subsection: the three re-auth triggers (`rootState.onDidChange`, `onDidChangeSessions`, `onDidChangeDefaultAccount`), the `AgentHostAuthTokenCache` dedupe pattern, and the three cache lifecycle rules (seed after RPC, clear on failure, clear on restart). Added two gotchas: `onDidChange` fires on every action, and cache must be seeded after the RPC not before.
 - **2026-04-16** — `6cd94ddc6f` — initial entry. Captures the AHP generic-protocol philosophy (neither client nor server is "VS Code"), the two sanctioned convention exceptions (well-known config property names; tool-call kinds + metadata), the two-app topology (VS Code app vs Agents app — the latter still rooted at `src/vs/sessions/`), the three deployment configurations (VS Code + local; Agents + local; Agents + remote × N), the `IAgentConnection` / `AgentHostSessionHandler` shared seam with `connectionAuthority` and `sessionType` as the only per-configuration variations, and the where-to-put-new-code decision tree.
 - **2026-04-17** — `9364e338cc` — clarified that SDK-backed providers own session filtering/adoption boundaries before generic aggregation or UI listing.
 - **2026-04-19** — `bea3e7e018` — added gotcha: agent-host child process registers only `INativeEnvironmentService`, not the base `IEnvironmentService` token.
