@@ -9,24 +9,23 @@ Detect and **fix** drift between the knowledge docs and the current state of the
 
 The trick: don't re-read every doc against every code reference. Use the VS Code Git history since each doc's baseline SHA — if nothing relevant has changed in the area a doc covers, the doc is presumed current and is skipped.
 
-## Precondition
+## Knowledge repo location
 
-Knowledge repo must be set up. If `$VSCODE_REPO/.knowledge` doesn't exist as a symlink, or doesn't resolve, run the `init` skill automatically — do **not** ask the user. Then proceed with reconcile.
+This `SKILL.md` lives at `<KNOWLEDGE_REPO>/vsckb/skills/reconcile/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory three levels up from this file. All knowledge reads and writes happen against that path directly.
 
-Re-derive what you need each time:
-
-- `KNOWLEDGE_CHECKOUT = "$VSCODE_REPO/.knowledge"` (the symlink path itself; don't dereference it)
-- `VSCODE_REPO` from `git rev-parse` against the workspace root.
+Re-derive `VSCODE_REPO` from `git rev-parse` against the workspace root.
 
 Reconciliation is normally run from the main VS Code checkout, against `origin/main`. If running from a worktree on a feature branch, ask the user whether to reconcile against `origin/main` (recommended) or `HEAD`.
 
 Make sure the VS Code repo is up to date with the remote: `git -C "$VSCODE_REPO" fetch origin --quiet`.
 
+Make sure the knowledge repo is up to date too: `git -C "$KNOWLEDGE_REPO" pull --rebase --autostash origin main`. Stop if it fails.
+
 ## Workflow
 
 ### 1. Walk the docs
 
-For each `*.md` under `$KNOWLEDGE_CHECKOUT/docs/`:
+For each `*.md` under `$KNOWLEDGE_REPO/docs/`:
 
 - Read the `Covers:` line to get the list of VS Code paths the doc claims responsibility for.
 - Read the most recent changelog entry to get the doc's baseline SHA and date.
@@ -93,13 +92,24 @@ Use phrasing like "no doc changes — <commit description> didn't affect the arc
 
 Do **not** ask the user before bumping baselines for no-op reconciliations — it's the default behavior. The new SHA becomes the new baseline for next time.
 
-### 6. Report
+### 6. Commit and push
 
-Once updates are written, summarize:
+Use a commit message like `reconcile: <YYYY-MM-DD> against origin/main @ <short SHA>`:
+
+```sh
+SHA="$(git -C "$VSCODE_REPO" rev-parse --short=10 origin/main)"
+git -C "$KNOWLEDGE_REPO" add -A
+git -C "$KNOWLEDGE_REPO" commit -m "reconcile: $(date +%Y-%m-%d) against origin/main @ $SHA"
+git -C "$KNOWLEDGE_REPO" push origin main
+```
+
+If the push is rejected, re-run `git pull --rebase --autostash origin main` and retry once. If it still fails, stop and surface to the user.
+
+### 7. Report
+
+Once committed, summarize:
 
 - **Reconciled:** which docs were updated, and which VS Code commits drove each update.
 - **Presumed current:** count of docs with no changes since baseline. (List them only if the user asks.)
-- **Debt & gotchas changes:** list any `debt:` removals proposed and any `gotcha:` entries flagged as potentially stale, with the doc and the reason — the user confirms before they're removed.
+- **Debt & gotchas changes:** list any `debt:` removals proposed and any `gotcha:` entries flagged as potentially stale, with the doc and the reason — the user confirms before they're removed (a follow-up commit).
 - **Needs human attention:** docs flagged for substantial invalidation in step 5.
-
-Do not commit. Tell the user the diff is ready for review at `$KNOWLEDGE_CHECKOUT`.

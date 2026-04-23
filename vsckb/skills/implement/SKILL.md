@@ -7,32 +7,40 @@ description: "Implement a change to the VS Code agent host, using prior knowledg
 
 Implement a change to the VS Code agent host, augmented by prior knowledge from the knowledge repo. This skill is deliberately lightweight — it's the normal agent coding workflow with knowledge context loaded up front.
 
-## Precondition
+## Knowledge repo location
 
-Knowledge repo must be set up. If `$VSCODE_REPO/.knowledge` doesn't exist as a symlink, or doesn't resolve, run `init` first — automatically, without asking.
+This `SKILL.md` lives at `<KNOWLEDGE_REPO>/vsckb/skills/implement/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory three levels up from this file. All knowledge reads and writes happen against that path directly.
 
-Re-derive what you need each time:
+Re-derive `VSCODE_REPO` and `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
 
-- `KNOWLEDGE_CHECKOUT = "$VSCODE_REPO/.knowledge"` (the symlink path itself; don't dereference it)
-- `SESSION_SLUG`: the single subfolder under `$KNOWLEDGE_CHECKOUT/plan/`. If there are zero, you'll create one in step 2 below. If there are multiple, ask the user which session this is.
+## Write boundary in the knowledge repo
+
+While implementing, the only files you may create or modify in the knowledge repo are under `$KNOWLEDGE_REPO/plan/$SESSION_SLUG/`. Do not touch `docs/`, `changes/`, `index.md`, or other sessions' `plan/` folders. Doc updates and history entries happen at `finalize`. Concurrent sessions write to disjoint slugs.
 
 ## Workflow
 
-### 1. Pick up the plan if one exists
+### 1. Pick up or create the session slug
 
-If `$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/plan.md` exists:
+If `plan` ran earlier in this conversation, reuse the `SESSION_SLUG` it created. Otherwise:
+
+- If the user is resuming work and tells you the slug, use it.
+- If exactly one folder under `$KNOWLEDGE_REPO/plan/` looks like this session's, use it.
+- Otherwise generate one: `SESSION_SLUG = YYYY-MM-DD-<short-description>`. If that path already exists, append `-2`, `-3`, etc. until free. `mkdir -p "$KNOWLEDGE_REPO/plan/$SESSION_SLUG"`.
+
+The empty folder is enough to mark the session for `finalize`. You don't need to write `plan.md`/`tasks.md` if there's no plan.
+
+### 2. Load context
+
+If `$KNOWLEDGE_REPO/plan/$SESSION_SLUG/plan.md` exists:
 
 - Read both `plan.md` and `tasks.md` in full.
 - Re-read every doc listed under "Knowledge context used" in `plan.md`. The plan shouldn't be trusted to summarize them perfectly; the docs are the source of truth.
 - Work through `tasks.md` in order, respecting declared dependencies.
-- As tasks complete, update `tasks.md` in place by checking them off and noting any deviations from the plan inline (e.g., `- note: implemented as X instead of Y because Z`). This becomes useful context for `finalize`.
 
-### 2. If no plan exists
+If no plan exists:
 
-- Identify which docs and tasks in `$KNOWLEDGE_CHECKOUT/index.md` overlap with the user's request, and read them before starting.
+- Identify which docs and tasks in `$KNOWLEDGE_REPO/index.md` overlap with the user's request, and read them before starting.
 - Skim the most recent two or three `changes/` entries that touch the same subsystem.
-- Generate a `SESSION_SLUG` (`YYYY-MM-DD-<short-description>`) and create `$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/` so `finalize` has a stable place to land. (You don't need to write `plan.md`/`tasks.md` — the empty folder is enough to mark the session.)
-- Then proceed with normal implementation.
 
 ### 3. Implement
 
@@ -54,7 +62,7 @@ If during implementation you discover that a knowledge doc is wrong or incomplet
 
 ### 4. Stop at "implementation complete"
 
-This skill does not commit, push, or finalize. When the user is satisfied with the implementation, they (or the agent at their direction) run `finalize` to roll learnings back into the knowledge repo.
+This skill does not commit, push, or finalize. When the user is satisfied with the implementation, they (or the agent at their direction) run `finalize` to roll learnings back into the knowledge repo and commit them.
 
 ## Privacy: don't leak the knowledge repo into source
 
@@ -62,7 +70,7 @@ The knowledge repo is **private to the user**. Other contributors to the VS Code
 
 When writing code, comments, commit messages, PR descriptions, or any other artifact that lands in the public VS Code repo, **never reference**:
 
-- The knowledge repo by name or path (e.g. `knowledge-vscode`, `.knowledge`, `$KNOWLEDGE_CHECKOUT`).
+- The knowledge repo by name or path (e.g. `knowledge-vscode`, `$KNOWLEDGE_REPO`).
 - Any doc inside it (e.g. `docs/agent-host-topology.md`, `docs/agent-host-sessions-providers.md`).
 - Concepts whose only home is the knowledge repo (e.g. "agent-host topology", "well-known property names" as a knowledge-repo doc heading) phrased in a way that implies a doc the reader can look up.
 

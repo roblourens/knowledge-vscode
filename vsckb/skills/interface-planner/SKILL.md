@@ -1,12 +1,12 @@
 ---
 name: interface-planner
-description: "Plan refactorings and API/interface changes by extracting current TypeScript interfaces into a .d.ts snapshot, iterating on a proposed .d.ts shape, and opening a side-by-side diff for review. Use when asked to plan a refactor, redesign interfaces, compare current vs proposed API shapes, or create an interface-level implementation plan. Writes outputs under $VSCODE_REPO/.knowledge/plan/<session>/."
+description: "Plan refactorings and API/interface changes by extracting current TypeScript interfaces into a .d.ts snapshot, iterating on a proposed .d.ts shape, and opening a side-by-side diff for review. Use when asked to plan a refactor, redesign interfaces, compare current vs proposed API shapes, or create an interface-level implementation plan. Writes outputs under $KNOWLEDGE_REPO/plan/<session>/."
 argument-hint: "What refactor or interface/API change should be planned?"
 ---
 
 # Interface Planner
 
-Use this skill to plan code changes by working with TypeScript declaration snapshots: `.d.ts` files that show only public interfaces, types, and class signatures, without implementation bodies. Like the `plan` skill, this skill never edits VS Code source files. The only files it writes are under `$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/`, where `KNOWLEDGE_CHECKOUT` is `$VSCODE_REPO/.knowledge`.
+Use this skill to plan code changes by working with TypeScript declaration snapshots: `.d.ts` files that show only public interfaces, types, and class signatures, without implementation bodies. Like the `plan` skill, this skill never edits VS Code source files. The only files it writes are under `$KNOWLEDGE_REPO/plan/$SESSION_SLUG/`.
 
 The workflow produces two files:
 
@@ -24,32 +24,31 @@ These two files are presented as a diff. The user reads the diff to understand w
 - Only lines that actually represent a design change should differ between the two files.
 - If an unchanged interface or type is not important to understanding the plan, remove it from both files to keep the diff focused.
 
-## Precondition
+## Knowledge repo location
 
-Knowledge repo must be set up. If `$VSCODE_REPO/.knowledge` does not exist as a symlink, or does not resolve, run `init` first automatically, without asking.
+This `SKILL.md` lives at `<KNOWLEDGE_REPO>/vsckb/skills/interface-planner/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory three levels up from this file. All knowledge reads and writes happen against that path directly.
 
-Re-derive what you need each time:
-
-- `KNOWLEDGE_CHECKOUT = "$VSCODE_REPO/.knowledge"` (the symlink path itself; do not dereference it).
-- `VSCODE_REPO` and `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
+Re-derive `VSCODE_REPO` and `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
 
 ## Output Location
 
-Plan files go under `$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/`. The `SESSION_SLUG` uses the same convention as the `plan` skill: `YYYY-MM-DD-<short-description>`, where `<short-description>` is a short kebab-case summary of the task.
+Plan files go under `$KNOWLEDGE_REPO/plan/$SESSION_SLUG/`. The `SESSION_SLUG` uses the same convention as the `plan` skill: `YYYY-MM-DD-<short-description>`. If the path already exists from another session, append `-2`, `-3`, etc.
 
 Example:
 
 ```text
-$KNOWLEDGE_CHECKOUT/plan/2026-03-28-refactor-chat-service/
+$KNOWLEDGE_REPO/plan/2026-03-28-refactor-chat-service/
 ```
 
 Create the session folder at the start of Phase 2, before writing any files:
 
 ```bash
-mkdir -p "$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG"
+mkdir -p "$KNOWLEDGE_REPO/plan/$SESSION_SLUG"
 ```
 
 If a normal `plan.md` and `tasks.md` already exist for the same session, keep the interface snapshots in that same session folder. If this skill is being used standalone, the folder may contain only the interface planner files.
+
+While running, this skill may **only** create or modify files under `$KNOWLEDGE_REPO/plan/$SESSION_SLUG/`. Do not touch `docs/`, `changes/`, `index.md`, or other sessions' plan folders.
 
 ## Workflow
 
@@ -60,11 +59,11 @@ If a normal `plan.md` and `tasks.md` already exist for the same session, keep th
 
 ### Phase 2: Explore and Extract Current Interfaces
 
-1. Pick `SESSION_SLUG = YYYY-MM-DD-<short-description>` and create `$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/`.
+1. Pick `SESSION_SLUG = YYYY-MM-DD-<short-description>` and create `$KNOWLEDGE_REPO/plan/$SESSION_SLUG/`.
 2. Search the codebase to identify the relevant source files: interfaces, types, classes, services, and consumers affected by the change.
 3. Read those files. Focus on the public API surface: exported interfaces, type aliases, class signatures, public/protected methods and properties, enums, and important constants.
 4. Follow the import graph one level out. If the interfaces being changed are consumed by or extended from other interfaces, include those too so the user can see ripple effects.
-5. Write `$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/_plan_current.d.ts`. This file should contain:
+5. Write `$KNOWLEDGE_REPO/plan/$SESSION_SLUG/_plan_current.d.ts`. This file should contain:
    - An `/* eslint-disable */` comment at the top.
    - A header comment with the date and the files it was extracted from.
    - All relevant interfaces, types, class signatures, and enums.
@@ -86,8 +85,8 @@ Extraction rules:
 
 ### Phase 3: Propose Changes Iteratively
 
-1. Copy `$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/_plan_current.d.ts` to `$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/_plan_proposed.d.ts`.
-2. Edit `$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/_plan_proposed.d.ts` to reflect the proposed design. Typical edits include:
+1. Copy `$KNOWLEDGE_REPO/plan/$SESSION_SLUG/_plan_current.d.ts` to `$KNOWLEDGE_REPO/plan/$SESSION_SLUG/_plan_proposed.d.ts`.
+2. Edit `$KNOWLEDGE_REPO/plan/$SESSION_SLUG/_plan_proposed.d.ts` to reflect the proposed design. Typical edits include:
    - Adding new interfaces or types.
    - Adding, removing, or renaming methods on existing interfaces.
    - Splitting an interface into two.
@@ -138,7 +137,7 @@ Iterate up to three times. If the design is still uncertain after three rounds, 
 1. Open the diff between the two files:
 
 ```bash
-code-insiders -r --diff "$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/_plan_current.d.ts" "$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/_plan_proposed.d.ts"
+code-insiders -r --diff "$KNOWLEDGE_REPO/plan/$SESSION_SLUG/_plan_current.d.ts" "$KNOWLEDGE_REPO/plan/$SESSION_SLUG/_plan_proposed.d.ts"
 ```
 
 The `-r` flag opens it in the current window.
@@ -163,14 +162,13 @@ If the user provides feedback:
 
 Once approved, `_plan_proposed.d.ts` serves as the implementation spec. Either proceed to implement the changes if the user asks, or leave the files for the user or another agent/mode.
 
-Do not delete the plan files. They serve as an archive under `$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/`.
+Do not delete the plan files. They serve as an archive under `$KNOWLEDGE_REPO/plan/$SESSION_SLUG/` until `finalize` cleans up the session folder.
 
 ## Constraints
 
 - Never edit files under `$VSCODE_REPO`. Planning only.
-- Never edit files under `$KNOWLEDGE_CHECKOUT/docs/`, `changes/`, or `index.md`. Doc updates happen through `finalize` after implementation.
-- Never write interface planner outputs outside `$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG/`.
-- Never commit. The user reviews and commits.
+- Never edit anything in `$KNOWLEDGE_REPO` outside `plan/$SESSION_SLUG/`. Doc updates and history entries happen at `finalize`.
+- Never commit. Commits happen at `finalize`.
 
 ## Guidelines
 

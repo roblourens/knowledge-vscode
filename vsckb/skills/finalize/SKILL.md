@@ -1,39 +1,44 @@
 ---
 name: finalize
-description: "Roll what was learned in this session back into the VS Code agent host knowledge repo. Use when the user says 'finalize knowledge', 'finalize the session', 'capture what we learned', or has finished implementing a change and wants the docs and changelog updated. Pulls latest from origin/main, writes doc updates, a new changes/ entry, and cleans up the session's plan/ subfolder. Does NOT commit, push, or merge — leaves the diff for the user to review, then 'land' to publish it."
+description: "Roll what was learned in this session back into the VS Code agent host knowledge repo and commit it. Use when the user says 'finalize knowledge', 'finalize the session', 'capture what we learned', or has finished implementing a change and wants the docs and changelog updated. Updates docs and changes/, cleans up the session's plan/ subfolder, then commits and pushes the result directly to main."
 ---
 
 # Skill: finalize
 
-Capture what was learned in this session as on-disk changes in the knowledge repo, ready for the user to review and commit.
+Capture what was learned in this session as updates to the knowledge repo, then commit and push them to `main`.
 
-This skill **does not commit, push, merge, or remove worktrees**. The only on-disk deletion it performs is removing the session's `plan/` subfolder. Everything else is the user's call after reviewing the diff — once they're happy, the `land` skill publishes it.
+This skill writes doc updates, a new `changes/` entry, removes the session's `plan/` subfolder, and commits the lot. It is the only skill in this plugin that writes outside `plan/<slug>/` or that commits.
 
-## Precondition
+## Knowledge repo location
 
-Knowledge repo must be set up. If `$VSCODE_REPO/.knowledge` doesn't exist as a symlink, or doesn't resolve, run `init` first.
+This `SKILL.md` lives at `<KNOWLEDGE_REPO>/vsckb/skills/finalize/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory three levels up from this file. All knowledge reads, writes, and git operations happen against that path directly.
 
-Re-derive what you need each time:
+Re-derive `VSCODE_REPO` and `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
 
-- `KNOWLEDGE_CHECKOUT = "$VSCODE_REPO/.knowledge"` (the symlink path itself; don't dereference it)
-- `VSCODE_REPO`, `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
-- `SESSION_SLUG`: the single subfolder under `$KNOWLEDGE_CHECKOUT/plan/`. If there are zero (the session never went through `plan` or `implement`), generate one now (`YYYY-MM-DD-<short-description>`). If there are multiple, ask the user.
+## Pick the session slug
+
+`SESSION_SLUG` is the session's subfolder under `$KNOWLEDGE_REPO/plan/`. If `plan` or `implement` ran earlier in this conversation, reuse the slug they used. Otherwise:
+
+- If exactly one folder under `plan/` looks like this session's work, use it.
+- If multiple folders are present (concurrent sessions in other VS Code windows), ask the user which slug belongs to this session — don't guess.
+- If none exist (the session never went through `plan` or `implement`), generate one now: `YYYY-MM-DD-<short-description>`.
 
 ## Workflow
 
-### 0. Sync with upstream
+### 1. Make sure the working tree is clean enough
 
-Before writing anything, pull the latest knowledge state into the session worktree so this session's edits land on top of any work other sessions have published since `init` ran:
+Check `git -C "$KNOWLEDGE_REPO" status --porcelain`. If there are uncommitted edits that don't belong to this session (e.g. another in-flight finalize, hand edits the user is working on), stop and surface them — do not commit them along with this session's work.
+
+### 2. Sync with origin
 
 ```sh
-cd "$KNOWLEDGE_CHECKOUT"
-git fetch origin main
-git merge --ff-only origin/main
+git -C "$KNOWLEDGE_REPO" fetch origin main --quiet
+git -C "$KNOWLEDGE_REPO" pull --rebase --autostash origin main
 ```
 
-The ff-merge should always succeed: the session branch was created from `main` at `init` time and no skill commits to it before `finalize`. If it fails (e.g. the user committed something on the branch by hand, or the working tree has conflicting uncommitted changes), stop and tell the user — don't try to resolve it.
+If the rebase fails (concurrent finalize from another session touched the same docs), stop and surface the conflict to the user. Don't attempt to auto-resolve prose conflicts.
 
-### 1. Retrospective — what went wrong, and what would have prevented it
+### 3. Retrospective — what went wrong, and what would have prevented it
 
 **This is the most important step. Do it before writing anything else.** The point of the knowledge base is to make the *next* session avoid the mistakes of *this* one. If a finalize doesn't surface those mistakes, the knowledge base doesn't compound.
 
@@ -54,20 +59,20 @@ For each item, answer: **what specific addition or change to the knowledge base 
 - A **new doc** (no doc covers this area at all; that's why it bit you).
 - A **`changes/` summary** entry (decision rationale or narrative that doesn't fit anywhere else, but the next person looking at this area should read it).
 
-Write this mapping down somewhere durable for the rest of finalize to consume — either in your reasoning, or as a scratch list. Steps 2–5 are *executing* on this mapping, not generating it from scratch.
+Steps 4–7 are *executing* on this mapping, not generating it from scratch.
 
-If the session genuinely had no missteps and the existing docs were accurate enough that the work went smoothly, say so explicitly to the user — that's a useful signal too — and skip ahead to step 5 (the `changes/` summary). But err strongly on the side of finding something: "the work went smoothly" is rarely true on inspection.
+If the session genuinely had no missteps and the existing docs were accurate enough that the work went smoothly, say so explicitly to the user — that's a useful signal too — and skip ahead to step 7 (the `changes/` summary). But err strongly on the side of finding something: "the work went smoothly" is rarely true on inspection.
 
 Note: things like decisions and their rationale belong in `changes/`, not `docs/`. Things about how a component currently works belong in `docs/`. Things to revisit or preserve carefully belong in `## Debt & gotchas`.
 
-### 2. Update existing docs
+### 4. Update existing docs
 
-For each existing doc in `$KNOWLEDGE_CHECKOUT/docs/` whose subject area was changed by this session:
+For each existing doc in `$KNOWLEDGE_REPO/docs/` whose subject area was changed by this session:
 
 - Revise the doc body to reflect the new state.
 - Update the `Covers:` line if the set of relevant paths changed.
 - Update inline cross-references if relationships between components changed.
-- Update the `## Debt & gotchas` section (see step 2a).
+- Update the `## Debt & gotchas` section (see step 4a).
 - Append a changelog entry to the doc's changelog section:
 
   ```markdown
@@ -76,7 +81,7 @@ For each existing doc in `$KNOWLEDGE_CHECKOUT/docs/` whose subject area was chan
 
   Use the current HEAD of `$VSCODE_BRANCH` for the SHA, abbreviated to 10 characters: `git -C "$VSCODE_REPO" rev-parse --short=10 HEAD`.
 
-### 2a. Update Debt & gotchas
+### 4a. Update Debt & gotchas
 
 Review the conversation (and any `## Discoveries for finalize` notes left by `implement` in `tasks.md`) for things to record. Each doc has a `## Debt & gotchas` section between the body and the changelog — add or remove bullets as warranted.
 
@@ -95,11 +100,11 @@ Format (one bullet line):
 
 If no `## Debt & gotchas` section exists in a doc that needs an entry, add one between the body and the `## Changelog`.
 
-If the new item is **cross-cutting** (spans multiple docs / affects how to work across the subsystem), also add a one-line pointer under `## Active debt & gotchas` in `$KNOWLEDGE_CHECKOUT/index.md` referencing the doc(s) where the detail lives. Don't duplicate the detail — just point.
+If the new item is **cross-cutting** (spans multiple docs / affects how to work across the subsystem), also add a one-line pointer under `## Active debt & gotchas` in `$KNOWLEDGE_REPO/index.md` referencing the doc(s) where the detail lives. Don't duplicate the detail — just point.
 
-### 3. Create new docs if needed
+### 5. Create new docs if needed
 
-If something material was learned about a component that has no doc yet, create one under `$KNOWLEDGE_CHECKOUT/docs/<descriptive-name>.md`:
+If something material was learned about a component that has no doc yet, create one under `$KNOWLEDGE_REPO/docs/<descriptive-name>.md`:
 
 ```markdown
 # <Component name>
@@ -119,11 +124,15 @@ _(Empty for now. Entries take the form `- **debt|gotcha** (YYYY-MM-DD, file:symb
 
 For the initial SHA: if the doc describes existing state in the VS Code repo, use the current HEAD of `origin/main` (`git -C "$VSCODE_REPO" rev-parse --short=10 origin/main`). If it describes something that's part of an in-flight change on the current branch, use the current HEAD of `$VSCODE_BRANCH` (`git -C "$VSCODE_REPO" rev-parse --short=10 HEAD`). When in doubt, use the branch HEAD. Always abbreviate to 10 characters.
 
-Add a one-line entry to `$KNOWLEDGE_CHECKOUT/index.md` under **Docs** with the doc's name, a keyword-rich one-line description, and its `Covers:` paths.
+Add a one-line entry to `$KNOWLEDGE_REPO/index.md` under **Docs** with the doc's name, a keyword-rich one-line description, and its `Covers:` paths.
 
-### 4. Write the change entry
+### 6. Clean up the plan
 
-Create `$KNOWLEDGE_CHECKOUT/changes/$SESSION_SLUG/summary.md`:
+Delete the session's plan folder: `rm -rf "$KNOWLEDGE_REPO/plan/$SESSION_SLUG"`.
+
+### 7. Write the change entry
+
+Create `$KNOWLEDGE_REPO/changes/$SESSION_SLUG/summary.md`:
 
 ```markdown
 # <Title — one line, matches the plan if there was one>
@@ -141,7 +150,7 @@ Create `$KNOWLEDGE_CHECKOUT/changes/$SESSION_SLUG/summary.md`:
 - ...
 
 ## What went wrong or was misunderstood
-The retrospective from step 1, distilled. One bullet per misstep, dead end, wrong assumption, or surprise. Each bullet pairs the mistake with what would have prevented it and where that prevention now lives:
+The retrospective from step 3, distilled. One bullet per misstep, dead end, wrong assumption, or surprise. Each bullet pairs the mistake with what would have prevented it and where that prevention now lives:
 
 - <what went wrong / what was assumed vs. what was true> — **prevented by:** <`gotcha:` on doc X | `debt:` on doc Y | doc body update on Z | new doc N | this summary>.
 - ...
@@ -155,18 +164,27 @@ If the session truly had no missteps, write `- (none — existing knowledge was 
 - <list of docs updated or created in this session, including which `## Debt & gotchas` entries were added or removed>
 ```
 
-The **What went wrong** section is mandatory — even if short. It is the durable artifact of step 1. The whole point of finalize is that the next session avoids these mistakes, which only works if they're written down.
+The **What went wrong** section is mandatory — even if short.
 
-### 5. Clean up the plan
+### 8. Commit and push
 
-Delete the session's plan folder: `rm -rf "$KNOWLEDGE_CHECKOUT/plan/$SESSION_SLUG"`. (This is the only deletion this skill performs.)
+Use the title from the `changes/$SESSION_SLUG/summary.md` first heading (without the leading `# `) as the commit subject:
 
-### 6. Report the diff
+```sh
+SUBJECT="$(awk '/^# /{sub(/^# /,""); print; exit}' "$KNOWLEDGE_REPO/changes/$SESSION_SLUG/summary.md")"
+git -C "$KNOWLEDGE_REPO" add -A
+git -C "$KNOWLEDGE_REPO" commit -m "$SUBJECT"
+git -C "$KNOWLEDGE_REPO" push origin main
+```
 
-Run `git -C "$KNOWLEDGE_CHECKOUT" status` and `git -C "$KNOWLEDGE_CHECKOUT" diff --stat` and surface the result to the user. Tell them:
+If the push is rejected (someone else pushed between steps 2 and 8), re-run step 2's `pull --rebase` and retry the push once. If it still fails, stop and surface to the user.
 
-- What files were created, modified, deleted.
-- The path to `$KNOWLEDGE_CHECKOUT` so they can review the diff in their editor (also accessible as `.knowledge/` inside the VS Code worktree).
-- Once they're happy with the diff, the `land` skill commits it, fast-forward-merges into `main`, pushes, and tears down the session worktree.
+### 9. Report
 
-Do not run `git add`, `git commit`, `git push`, `git merge`, `git worktree remove`, or `rm` on the `.knowledge` symlink. That is `land`'s job.
+Tell the user:
+
+- The committed SHA (`git -C "$KNOWLEDGE_REPO" rev-parse --short=10 HEAD`).
+- Which docs were created/modified and which `## Debt & gotchas` entries were added or removed.
+- That `plan/$SESSION_SLUG/` is gone.
+
+If the work needs amending later, the user can edit `$KNOWLEDGE_REPO` directly and make a follow-up commit.

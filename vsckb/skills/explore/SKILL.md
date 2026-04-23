@@ -15,20 +15,17 @@ Use this skill when the user wants to:
 
 If the conversation crystallizes into actual work, suggest moving to `plan` (for non-trivial changes) or `implement` (for small ones).
 
-## Precondition
+## Knowledge repo location
 
-Knowledge repo must be set up. If `$VSCODE_REPO/.knowledge` doesn't exist as a symlink, or doesn't resolve, run `init` first — automatically, without asking.
+This `SKILL.md` lives at `<KNOWLEDGE_REPO>/vsckb/skills/explore/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory three levels up from this file. All knowledge reads happen against that path directly — there is no worktree, branch, or symlink layer.
 
-Re-derive what you need each time:
-
-- `KNOWLEDGE_CHECKOUT = "$VSCODE_REPO/.knowledge"` (the symlink path itself; don't dereference it)
-- `VSCODE_REPO`, `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
+Re-derive `VSCODE_REPO` and `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
 
 ## Workflow
 
 ### 1. Orient
 
-- Read `$KNOWLEDGE_CHECKOUT/index.md`, including the `## Active debt & gotchas` section if there's anything there relevant to the question.
+- Read `$KNOWLEDGE_REPO/index.md`, including the `## Active debt & gotchas` section if there's anything there relevant to the question.
 - Read every doc under `docs/` whose `Covers:` line overlaps with the user's question. Always read the doc's `## Debt & gotchas` section — it captures load-bearing weirdness and known issues that often answer the user's question directly or change which approach is viable.
 - Skim the most recent two or three `changes/` entries that touch the same subsystem if they look pertinent.
 
@@ -43,9 +40,9 @@ For broad questions that span independent areas (protocol + workbench, local + r
 ### 3. Answer or iterate
 
 - Answer concretely, citing specific knowledge docs and source files. Quote or link to specific sections; don't paraphrase the docs.
-- If the user is iterating on an idea, surface trade-offs, prior art in the codebase, and constraints from existing knowledge docs (especially [agent-host-topology](../../docs/agent-host-topology.md)'s decision tree, when it applies).
+- If the user is iterating on an idea, surface trade-offs, prior art in the codebase, and constraints from existing knowledge docs (especially [agent-host-topology](../../../docs/agent-host-topology.md)'s decision tree, when it applies).
 - If you discover something that contradicts a knowledge doc, **note it in your reply** but do not edit the doc — that's `finalize`'s job. If it's significant and worth capturing now, suggest the user run `reconcile` (or fix the doc themselves).
 
 ### 4. Don't write artifacts
 
-This skill writes nothing under `$KNOWLEDGE_CHECKOUT/` — no `plan/`, `docs/`, or `changes/` updates. It also writes no code in `$VSCODE_REPO`. If the conversation produces an idea worth keeping, suggest moving to `plan` (which will create the session folder) or `implement` (which will create an empty session folder and start coding).
+This skill writes nothing under `$KNOWLEDGE_REPO/` and no code in `$VSCODE_REPO`. If the conversation produces an idea worth keeping, suggest moving to `plan` (which will create a session folder under `plan/`) or `implement`.
