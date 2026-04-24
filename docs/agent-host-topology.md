@@ -2,13 +2,41 @@
 
 _Covers: src/vs/platform/agentHost/, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostChatContribution.ts, src/vs/sessions/contrib/remoteAgentHost/, src/vs/sessions/contrib/sessions/browser/views/sessionsList.ts, src/vs/sessions/contrib/chat/browser/scopedWorkspacePicker.ts_
 
-This is the **orientation doc**. It answers three questions that come up at the start of every agent-host task:
+This is the **orientation doc**. It answers four questions that come up at the start of every agent-host task:
 
+0. What is the *defining property* of the system that everything else falls out of?
 1. What *is* the Agent Host Protocol (AHP), and what is it explicitly *not*?
 2. Which apps in the VS Code repo can host agents, and in which configurations?
 3. Where does VS Code-specific behavior live, given the protocol is meant to be generic?
 
 If a contribution doesn't fit cleanly into the answers below, that's a signal — it usually means the protocol is being asked to do too much, or VS Code-specific code is leaking into the wrong layer.
+
+## 0. The defining property: agent-autonomous, client-optional
+
+> **The agent runs without a client. The client is a viewer/controller that comes and goes.**
+
+This is the single most load-bearing fact about the system. Internalize it before everything else; the rest of this doc, the protocol design, the persistence model, the reconnect/replay machinery, and the file-edit topology all fall out of it.
+
+Concretely:
+
+- The agent host server is a long-lived process that keeps making progress whether or not any client is connected.
+- Sessions can be created, run turns, finish, and be ended without a client involved.
+- The server is the source of truth for AHP-side state precisely because clients come and go.
+- File edits land where the agent runs, never where the client is. The agent's correctness can't depend on a client being there to apply something.
+- Auth must be expressible without a client present (the agent declares it needs auth; some client *eventually* provides it; work continues independently).
+
+Multi-client correctness — N clients observing the same session — is a *corollary* of this property, not the primary motivation. We need a server-of-truth + replay model anyway because clients are optional; once you have it, multi-client falls out for free.
+
+## AHP vs ACP — different problems on different axes
+
+The sibling [`agent-host-protocol`](https://github.com/microsoft/agent-host-protocol) repo has a dedicated doc on this: [docs/guide/ahp-and-acp.md](https://github.com/microsoft/agent-host-protocol/blob/main/docs/guide/ahp-and-acp.md). The short version:
+
+- **ACP** (Agent Client Protocol) is a 1:1 communication protocol between a single client and a single agent.
+- **AHP** is a coordination layer for **N clients sharing a host that hosts agents**. The host is the source of truth; clients reconcile.
+
+They compose: an AHP host *could* speak ACP downstream to agents. We don't do that today — our in-tree first-party agents (Copilot today, Claude planned) sit alongside `CopilotAgent` as in-process `IAgent` implementations using vendor SDKs directly. The host/agent layering is **collapsed in-process by design** for first-party agents.
+
+A future ACP bridge — `class AcpAgent implements IAgent` — is reserved for *external* agents that already speak ACP. It is not the eventual home for our own agents. New first-party agents follow the `CopilotAgent` shape.
 
 ## 1. Protocol philosophy: AHP is generic by design
 
@@ -41,6 +69,29 @@ These conventions live *outside* the protocol spec. They're how a generic protoc
 
 If you're tempted to add a third exception — stop. Almost always the right move is either (a) a new generic field on the protocol side, or (b) a new well-known convention that fits one of the two existing buckets. Adding VS Code names to the protocol itself is the failure mode.
 
+### A non-exception: interop with other vendor-neutral specs
+
+Distinct from the two convention exceptions above, AHP also **interops with other vendor-neutral specs** by carrying opaque references into them. The current example is **customizations**, which are [Open Plugin](https://open-plugins.com/) refs identified by URI. Open Plugin is a multi-vendor standard (not a VS Code construct), so AHP referencing it is not VS Code-flavoring the protocol — it's standardizing on a separate cross-app convention for what a customization ref means.
+
+This is structurally different from the two well-known exceptions: those are conventions *we* define on top of generic AHP fields; interop refs are pointers into specs *other people* define. AHP knows nothing about what's behind the URI; the agent fetches and applies it. If other vendor-neutral specs appear (a tool spec, a model registry, etc.), they fit the same shape: opaque refs in AHP, resolution by the agent.
+
+### State + reducers is for session/agent state — not for everything
+
+The state-tree-and-reducers model that AHP is famous for is the model for **session and agent state**: things multiple clients need to observe, replay after reconnect, or apply optimistically. It is **not** the model for everything in the protocol.
+
+Operations that are independent of session state — filesystem reads/writes, terminal management, and similar service-style RPCs — are plain commands, not actions through reducers. The two patterns coexist by design:
+
+- **Reducers** apply where multi-client observation, replay, and optimistic UI matter (anything in the session/root state tree).
+- **Commands** apply where you just need to ask the server to do something and get a result (filesystem ops, lifecycle calls, etc.).
+
+If you find yourself trying to design a reducer for `readFile`, you're in the wrong pattern. If you find yourself trying to call a command for "agent emitted a delta," same. The boundary between the two is a deliberate part of the protocol shape.
+
+### Greenfield, not back-compat
+
+The protocol is in active design. **Right now we prefer breaking changes over preserving compat.** `ProtocolCapabilities` exists as scaffolding for the future — it is not a current design constraint. Premature back-compat would distort decisions while we're still figuring out the right shape.
+
+This is a deliberate posture, not laziness. Once the protocol stabilizes, we'll switch modes; until then, treat "this would break older clients/servers" as a non-objection in design discussions.
+
 ### Designing for the spec and the in-tree client, not for theoretical external ones
 
 A corollary of "neither side is VS Code" that is **not** "design for hypothetical third-party callers":
@@ -53,7 +104,27 @@ Concrete example: when `CopilotAgent.listSessions()` was returning `[]` instead 
 
 This rule is the natural complement to the cardinal rule. "Neither side is VS Code" tells you not to bake VS Code names into the wire; **this** rule tells you not to bake hypothetical callers into the design either. The spec is the contract; both sides serve it.
 
-## 2. Topology: two apps, three configurations
+## 2. Topology: two apps, two deployment shells, three configurations
+
+Before the apps and configurations, there are two **axes of code sharing** to keep straight:
+
+1. **Server side vs. client side.** Server-side code (everything under `src/vs/platform/agentHost/node/`, plus what runs *inside* the agent host process — `IAgent` implementations, `AgentService`, transports, persistence) is **inherently shared**. Neither "the IDE" nor "the Agents app" exists at this layer; the server is just the AHP host.
+2. **For client-side code, who consumes it.** Client-side code splits into VS Code-specific (`vs/workbench/contrib/...`), Agents-app-specific (`vs/sessions/contrib/...`), and shared (`vs/workbench` or `vs/platform`, consumed by both).
+
+The two-pickers example in [agent-host-auto-approve-picker](./agent-host-auto-approve-picker.md) is *not* duplicated UI — it's two distinct client-side surfaces (workbench chat input toolbar vs. Agents-app new-chat page) sharing a model-layer delegate. Expect more of this pattern, not less. Trying to unify the views would produce a worse abstraction than the duplication; the shared delegate is the seam that matters.
+
+### Deployment shells
+
+The server-side code has **two entry points** today, each a different deployment shell:
+
+| Entry point | Transport | Spawned by | Lifecycle owner |
+|---|---|---|---|
+| `src/vs/platform/agentHost/node/agentHostMain.ts` | MessagePort over utility-process IPC | VS Code / Agents app main process | Workbench (parent process) |
+| `src/vs/platform/agentHost/node/agentHostServerMain.ts` | WebSocket | A launcher (tunnel, SSH wrapper, dev script) | The launcher / SIGTERM |
+
+When reading code, identify which shell it runs in — it determines transport, lifecycle, signal handling, and whether the parent process even exists.
+
+### The apps
 
 The VS Code repo ships **two apps** that share most of the agent-host code:
 
@@ -173,7 +244,71 @@ The decision tree, in order:
 
 If you can't place a piece of code in exactly one of these buckets, that's the moment to pause and re-read this doc — there's almost always a layering mistake hiding in the ambiguity.
 
-## Related
+## 4. Semantics: sessions, persistence, auth, customizations
+
+A handful of foundational facts about how the system actually behaves at runtime. Skipping these is a frequent source of confusion when reading the code.
+
+### Persistence is split: agent owns chat data, host owns metadata
+
+The agent backend (Copilot SDK today, Claude SDK planned) **owns the actual session data** — the chat history, messages, agent working memory. That lives wherever the SDK stores it, and is durably written by the SDK at the moment it's generated.
+
+The agent host **owns an augmenting metadata layer** in per-session SQLite databases under the host's `userDataPath` (see `SessionDataService`). This layer holds things AHP-side that the SDK doesn't know about: custom titles, `isRead`/`isDone` flags, `configValues`, diffs, etc.
+
+Two persistence stores per session, with different ownership and durability properties:
+
+- The agent SDK store is the **source of truth for chat content**. If lost, chat history is gone.
+- The metadata DB **augments** the SDK store. It is *not* rebuildable from SDK data — it's an independent record of host-side decisions.
+
+The shutdown path in `agentHostServerMain.ts` deliberately flushes `sessionDataService.whenIdle()` before disposing, because losing in-flight metadata writes (like a `setMetadata` call carrying the latest `configValues`) breaks the "Session Config persistence across restarts" contract. That flush is load-bearing — see the doc's `## Debt & gotchas` for the gotcha entry.
+
+### The database-existence ownership gate
+
+The Copilot SDK can report sessions that *this* AHP host did not create (e.g. sessions made by other Copilot tools using the same auth, or by a previous AHP install). The provider (`CopilotAgent.listSessions`) filters those out: **only sessions for which we have a metadata DB entry are surfaced as "ours."**
+
+This is intentional and firm:
+
+- Cross-tool session sharing is **out of scope**. AHP is not trying to be a universal viewer of every Copilot session ever; it's a host for sessions it manages.
+- If the metadata DB is lost (disk wipe, fresh install, corruption), the underlying SDK sessions still exist but are orphaned from AHP's perspective. Recovery is via other Copilot tools, not via AHP.
+- If pressure ever arrives to relax the gate, the path is **degrade gracefully without metadata**, not rebuild metadata. Don't design for that today.
+
+### AHP sessions ≠ SDK sessions
+
+A "session" in AHP is an **AHP-level abstraction for a unit of work the host can address, observe, and route actions to**. It is not a 1:1 mapping to anything in the agent backend.
+
+The canonical example: **subagents are first-class AHP sessions, but are *not* separate SDK sessions.** Structuring them as AHP sessions gives uniform host/client treatment of lifecycle, state, subscriptions, and UI \u2014 even though the underlying agent doesn't model them as separate sessions.
+
+The mapping between AHP sessions and SDK sessions is the **agent provider's job**. New providers don't need to (and shouldn't) preserve a 1:1 mapping if the host-side abstraction benefits from a richer one.
+
+This is an instance of a broader principle: **protocol-level uniformity beats SDK-side structural fidelity.** Model things uniformly at the protocol layer; let the provider translate to whatever the SDK actually does underneath.
+
+### Workspace lives where the agent runs
+
+In configuration C (Agents app + remote agent host), file edits land on the **remote machine**, not on the client. The agent is self-contained and acts on the workspace it sits next to; the client is a viewer/controller that observes via state actions and accesses files through the `AGENT_CLIENT_SCHEME` virtual filesystem provider proxy.
+
+Worktrees, checkpoints, diffs, and any other workspace-bound state all live on the agent's side. The client never holds the authoritative copy.
+
+This is a direct consequence of section 0: an agent that runs without a client cannot apply edits *via* a client.
+
+### Auth: a four-layer division of labor
+
+Auth is split across four layers, and each layer is ignorant of the others:
+
+| Layer | Owns |
+|---|---|
+| Agent SDK (Copilot, Claude, ...) | Token storage, refresh, OAuth dance, browser/dialog UI |
+| Agent host (provider) | Surfacing \"we need auth\" via `AHP_AUTH_REQUIRED` (-32007) |
+| AHP renderer client | Orchestrating the retry-after-auth loop via `authenticationPending` autorun |
+| Workbench / Agents-app UI | Showing the user the auth prompt (when not handled by the SDK directly) |
+
+The protocol's `protectedResources.required: true` + `AHP_AUTH_REQUIRED` throw is the **only contract** between the agent host and the renderer client \u2014 everything above it can be agent-agnostic, everything below it can be client-agnostic. New `IAgent` implementations (Claude, etc.) plug into the same mechanism without per-agent customization in the host.
+
+The provider-side temptation to `return []` instead of throwing on missing auth silently breaks the renderer's one-shot caches. Throw the error; let the autorun retry.
+
+## Principles
+
+A short list of the values that drive design decisions in the agent host. When in doubt, weigh changes against these.
+
+1. **Generic by construction.** Neither side of AHP is \"VS Code.\" Bake nothing product-specific into the wire. Use well-known conventions for two narrow exceptions; interop with vendor-neutral specs (Open Plugin) for everything else.\n2. **Design for the spec and the in-tree consumer; not for hypothetical third parties.** Generality lives in the spec, not in over-flexed APIs.\n3. **Greenfield velocity over back-compat.** Right now, breaking changes are *preferred*. Premature back-compat distorts the design.\n4. **Agent-autonomous, client-optional.** The agent does its own work; the client comes and goes. Everything else falls out of this.\n5. **State + reducers + `serverSeq` is the model for session/agent state \u2014 not for everything.** Service-style RPCs (filesystem, lifecycle) are plain commands. Don't conflate the two patterns.\n6. **Protocol-level uniformity beats SDK-side structural fidelity.** Subagents-as-sessions is the canonical example.\n7. **Layering over collapsing.** Two apps, one server runtime, multiple deployment shells, sharp ESLint-enforced import rules. Don't merge layers to save typing.\n8. **Pragmatism over purity.** Where layering doesn't actually buy something, accept the slight smell rather than refactor for principle's sake. Mark as debt if material; otherwise leave.\n\n## Related
 
 - [agent-host-protocol](./agent-host-protocol.md) — the wire contract this doc is the philosophy for.
 - [copilot-agent-provider](./copilot-agent-provider.md) — provider-level Copilot SDK session ownership and local metadata behavior.
@@ -182,6 +317,9 @@ If you can't place a piece of code in exactly one of these buckets, that's the m
 
 ## Debt & gotchas
 
+- **gotcha** (2026-04-23, agentHostServerMain.ts:shutdown) — the shutdown path closes `wsServer` first, then awaits `sessionDataService.whenIdle()` (capped at 3s) before disposing. This is load-bearing: a `setMetadata` write in flight when SIGTERM arrives can drop the latest `configValues`/`customTitle`/`isRead`/`isDone`/`diffs` value, which the "Session Config persistence across restarts" integration test guards against. Don't "clean up" by removing the flush or shrinking the timeout casually — reorder only with the same per-session-DB flush guarantee in mind.
+- **gotcha** (2026-04-23, copilotAgent.ts:listSessions database-existence gate) — the provider intentionally filters SDK-reported sessions down to only those with a metadata DB entry. The metadata DB is **not** rebuildable from SDK data; it's an independent record of host-side decisions. Don't relax the gate to "show everything the SDK knows about" without an explicit design conversation — the answer there is degrade-without-metadata, not rebuild-from-SDK.
+- **debt** (2026-04-23, src/vs/platform/agentHost/node/copilot/copilotAgent.ts) — `CopilotAgent` is product-specific code under `vs/platform`, which by VS Code convention is meant to be product-neutral. It can't move to `vs/workbench/contrib/` (the agent host server runs in its own process and can't import from workbench). The pragmatic home, when a second `IAgent` lands (e.g. Claude), is `src/vs/platform/agentHost/node/contrib/<vendor>/...` — mirroring the workbench `contrib/` convention to mark provider-specific code, even though `vs/platform` doesn't have a precedent for it. Today's location is fine; revisit if/when a second `IAgent` arrives.
 - **gotcha** (2026-04-22, agentHostChatContribution.ts:_authenticateWithServer / remoteAgentHost.contribution.ts:_authenticateWithConnection) — `RootStateSubscription.onDidChange` fires on **every** applied action (snapshot, optimistic, reconcile, applyAction), not only when `protectedResources` changes. Any handler wired to `rootState.onDidChange` that issues a network call or expensive work must dedupe that work on its own — never assume the event fires only on meaningful value changes.
 - **gotcha** (2026-04-22, agentHostAuth.ts:AgentHostAuthTokenCache) — the token cache must be seeded **after** the `authenticate()` RPC succeeds, never before. If seeded before, a transient RPC failure poisons the cache entry and suppresses all future retries. On any throw, call `cache.clear(resource)` to evict the entry. Additionally, the whole cache must be cleared on `onAgentHostStart` because the agent host process can restart and lose its in-memory auth state even while the client token is numerically unchanged.
 - **gotcha** (2026-04-19, agentHostMain.ts / agentHostServerMain.ts) — the agent-host child process registers ONLY `INativeEnvironmentService`, not `IEnvironmentService` (the base token). All consumers in the child process use the native token. The parent-process starter (`nodeAgentHostStarter.ts`) runs in the main Electron process's DI container and does use `IEnvironmentService`, but that's a different container — don't confuse the two. Other VS Code processes may register both tokens; the agent host is native-only.
@@ -190,6 +328,7 @@ If you can't place a piece of code in exactly one of these buckets, that's the m
 
 ## Changelog
 
+- **2026-04-23** — `f32a933746` — substantial expansion from a grilling/values session. Added section 0 ("agent-autonomous, client-optional" as the defining property), an AHP-vs-ACP framing pointing at the sibling repo's `docs/guide/ahp-and-acp.md`, the state-vs-commands distinction within the protocol, the greenfield/no-back-compat posture, the server-side-vs-client-side sharing axis, the two deployment shells (`agentHostMain.ts` utility process; `agentHostServerMain.ts` standalone WebSocket server), section 4 ("Semantics") covering the agent/host persistence split, the database-existence ownership gate, AHP-sessions ≠ SDK-sessions (subagents example), workspace-lives-where-the-agent-runs, and the four-layer auth division of labor. Added a Principles section summarizing the eight design values. Added a non-exception category for interop with vendor-neutral specs (Open Plugin). Added gotchas for the shutdown flush and the database-existence ownership gate, and a debt entry for the `CopilotAgent` location / future `contrib/<vendor>/` convention.
 - **2026-04-22** — `67763f6b5e` — added "Client-side authentication flow" subsection: the three re-auth triggers (`rootState.onDidChange`, `onDidChangeSessions`, `onDidChangeDefaultAccount`), the `AgentHostAuthTokenCache` dedupe pattern, and the three cache lifecycle rules (seed after RPC, clear on failure, clear on restart). Added two gotchas: `onDidChange` fires on every action, and cache must be seeded after the RPC not before.
 - **2026-04-16** — `6cd94ddc6f` — initial entry. Captures the AHP generic-protocol philosophy (neither client nor server is "VS Code"), the two sanctioned convention exceptions (well-known config property names; tool-call kinds + metadata), the two-app topology (VS Code app vs Agents app — the latter still rooted at `src/vs/sessions/`), the three deployment configurations (VS Code + local; Agents + local; Agents + remote × N), the `IAgentConnection` / `AgentHostSessionHandler` shared seam with `connectionAuthority` and `sessionType` as the only per-configuration variations, and the where-to-put-new-code decision tree.
 - **2026-04-17** — `9364e338cc` — clarified that SDK-backed providers own session filtering/adoption boundaries before generic aggregation or UI listing.

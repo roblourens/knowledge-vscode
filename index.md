@@ -14,6 +14,15 @@ The VS Code **agent host** is the subsystem that hosts AI coding agents (Copilot
 
 Docs in this knowledge base are scoped to *one component or concern* each, with a `Covers:` line declaring the VS Code paths the doc is primarily concerned with. Use the `Covers:` lists below to find the right doc for a task; follow inline cross-references inside docs to reach adjacent context.
 
+## Start here: the defining property and the principles
+
+Before reading any component-level doc, internalize two things from [agent-host-topology](docs/agent-host-topology.md):
+
+1. **The agent runs without a client. The client is a viewer/controller that comes and goes.** This single property explains why the host is a long-lived process, why state + reducers + `serverSeq` exists, why file edits land where the agent runs, and why multi-client correctness is a corollary rather than the goal.
+2. **The eight Principles** at the bottom of that doc — generic by construction; design for the spec and the in-tree consumer; greenfield velocity over back-compat; agent-autonomous; state+reducers for session state but commands for service RPCs; protocol-level uniformity over SDK fidelity; layering over collapsing; pragmatism over purity.
+
+For the AHP-vs-ACP question ("why a new protocol?"), see the sibling repo's [docs/guide/ahp-and-acp.md](https://github.com/microsoft/agent-host-protocol/blob/main/docs/guide/ahp-and-acp.md): AHP is a coordination layer for N clients sharing a host; ACP is 1:1 communication between a client and an agent. They compose; today our first-party agents (Copilot, future Claude) sit in-process as `IAgent` implementations rather than via ACP.
+
 ## Major architectural layers
 
 1. **Protocol layer** — `src/vs/platform/agentHost/common/state/`, plus the generated `state/protocol/` source synced from the sibling `agent-host-protocol` repo.
@@ -46,6 +55,7 @@ Cross-cutting items only. Per-component items live in each doc's `## Debt & gotc
 - **debt (2026-04-21 audit backlog)** — remaining Agent Host cleanup candidates span reducers, reconnect, server reverse RPC, providers, session handler, customization sync, subscriptions, protocol mirror validation, side effects, and timing-sensitive tests. See [changes/2026-04-21-agent-host-debt-and-remote-client](changes/2026-04-21-agent-host-debt-and-remote-client/summary.md#remaining-debt-tasks-from-the-audit).
 - **debt (Copilot CLI parity for selfhosting)** — Agent Host already covers the core session substrate, but still needs worktree commit/checkpoint lifecycle, richer prompt/reference attachments, shipping/PR flows, plan exit handling, MCP/client-tool parity, hook sync, and request/OTel logging before extension-host Copilot CLI parity is complete. See [copilot-agent-provider](docs/copilot-agent-provider.md#copilot-cli-parity-gaps-relevant-to-the-provider), [agent-host-session-handler](docs/agent-host-session-handler.md#request-context-and-client-tool-parity), and [changes/2026-04-21-copilot-cli-agent-host-gap-audit](changes/2026-04-21-copilot-cli-agent-host-gap-audit/summary.md).
 - **debt (knowledge workflow checkout shape)** — this session hit a broken `.knowledge` symlink, then `init` produced an empty worktree under the skill directory before the link was manually repointed to the real knowledge repo. Future finalize/land work should verify the symlink target, branch, and repo contents before writing. See [changes/2026-04-21-copilot-cli-agent-host-gap-audit](changes/2026-04-21-copilot-cli-agent-host-gap-audit/summary.md#what-went-wrong-or-was-misunderstood).
+- **debt (`IAgent` location convention)** — `CopilotAgent` lives at `src/vs/platform/agentHost/node/copilot/copilotAgent.ts`, which is product-specific code under product-neutral `vs/platform`. It can't move to `vs/workbench/contrib/` (the agent host server runs in its own process and can't import from workbench). When a second `IAgent` lands (e.g. Claude SDK), consider grouping providers under `src/vs/platform/agentHost/node/contrib/<vendor>/` — a small new convention since `vs/platform` doesn't have a `contrib/` precedent today. See [agent-host-topology#debt--gotchas](docs/agent-host-topology.md#debt--gotchas).
 
 ## Recent changes
 
