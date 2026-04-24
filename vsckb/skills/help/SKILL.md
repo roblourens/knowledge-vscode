@@ -9,13 +9,13 @@ Explain the knowledge plugin to the user.
 
 ## What to say
 
-Show the user the sections below. Keep the explanation concise — they can read more in the repo's `readme.md` if they want depth.
+Show the user the sections below. Keep the explanation concise — they can read more in the plugin root's `readme.md` if they want depth.
 
 ---
 
 ### What this is
 
-A personal knowledge base for the VS Code agent host subsystem. It lives in a separate Git repo (this plugin's repo) and is read/written directly — there's no worktree or symlink layer. Each skill resolves the repo path from its own `SKILL.md` location.
+A personal knowledge base for the VS Code agent host subsystem. It lives inside this plugin's root directory and is read/written directly — there's no worktree or symlink layer. Each skill resolves the knowledge root from its own `SKILL.md` location.
 
 The knowledge base has three kinds of content:
 
@@ -55,7 +55,7 @@ Periodically: `reconcile` brings stale docs back in sync with `origin/main`.
 - `docs/design-principles.md` — the first design-values document to read after the index.
 - `docs/` — component docs with `Covers:` lines and changelogs.
 - `changes/` — narrative history.
-- The knowledge repo's root `readme.md` — full design rationale.
+- The plugin root's `readme.md` — full design rationale.
 
 ---
 

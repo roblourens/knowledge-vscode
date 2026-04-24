@@ -17,7 +17,7 @@ If the conversation crystallizes into actual work, suggest moving to `plan` (for
 
 ## Knowledge repo location
 
-This `SKILL.md` lives at `<KNOWLEDGE_REPO>/vsckb/skills/explore/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory three levels up from this file. All knowledge reads happen against that path directly — there is no worktree, branch, or symlink layer.
+This `SKILL.md` lives at `<KNOWLEDGE_REPO>/skills/explore/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory two levels up from this file: the `vsckb` plugin root. All knowledge reads happen against that path directly — there is no worktree, branch, or symlink layer.
 
 Re-derive `VSCODE_REPO` and `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
 
@@ -40,7 +40,7 @@ For broad questions that span independent areas (protocol + workbench, local + r
 ### 3. Answer or iterate
 
 - Answer concretely, citing specific knowledge docs and source files. Quote or link to specific sections; don't paraphrase the docs.
-- If the user is iterating on an idea, surface trade-offs, prior art in the codebase, and constraints from existing knowledge docs (especially [agent-host-topology](../../../docs/agent-host-topology.md)'s decision tree, when it applies).
+- If the user is iterating on an idea, surface trade-offs, prior art in the codebase, and constraints from existing knowledge docs (especially [agent-host-topology](../../docs/agent-host-topology.md)'s decision tree, when it applies).
 - If you discover something that contradicts a knowledge doc, **note it in your reply** but do not edit the doc — that's `finalize`'s job. If it's significant and worth capturing now, suggest the user run `reconcile` (or fix the doc themselves).
 
 ### 4. Don't write artifacts

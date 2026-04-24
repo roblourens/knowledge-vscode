@@ -4,9 +4,9 @@
 
 This system maintains a personal knowledge base about the VS Code agent host subsystem, stored in a separate Git repo and accessed by AI coding agents via a set of namespaced skills. It is designed for one developer working with AI coding agents across multiple concurrent sessions on a large, multi-contributor codebase.
 
-This repo *is* the knowledge repo. It is not checked into the VS Code repo and lives independently. Coding agents access it through skills shipped as a VS Code agent plugin (this same repo). Each skill resolves the knowledge repo path from its own `SKILL.md` location — there's no setting, no symlink, no per-session worktree.
+This repo contains the knowledge plugin. The actual knowledge base lives inside the plugin root at `vsckb/`, next to the skills that read and write it. It is not checked into the VS Code repo and lives independently. Each skill resolves the knowledge root from its own `SKILL.md` location — there's no setting, no symlink, no per-session worktree.
 
-The system has two parts: a **knowledge repo** (this repo) containing docs, change logs, and task guidance, and the **`vsckb` VS Code agent plugin** (under `vsckb/`, in the same Team Kit-style agent plugin format used by `vscode-team-kit`) that ships a set of skills (`explore`, `plan`, `implement`, `finalize`, `reconcile`, `interface-planner`, `help`) which manage the lifecycle of planning, implementing, documenting, and validating. Installing the plugin registers the skills under the `vsckb` namespace in VS Code (e.g. `vsckb:plan`, `vsckb:implement`).
+The system is packaged as the **`vsckb` VS Code agent plugin** (under `vsckb/`, in the same Team Kit-style agent plugin format used by `vscode-team-kit`). The plugin contains both the knowledge artifacts (`index.md`, `docs/`, `changes/`, `plan/`) and the skills (`explore`, `plan`, `implement`, `finalize`, `reconcile`, `interface-planner`, `help`) which manage the lifecycle of planning, implementing, documenting, and validating. Installing the plugin registers the skills under the `vsckb` namespace in VS Code (e.g. `vsckb:plan`, `vsckb:implement`).
 
 ---
 
@@ -16,26 +16,26 @@ The knowledge repo is this repo. Its structure:
 
 ```
 knowledge-vscode/
-├── index.md
 ├── marketplace.json
-├── readme.md
-├── docs/
-│   ├── agent-host-protocol.md
-│   ├── agent-host-session-handler.md
-│   └── ...
-├── vsckb/
+└── vsckb/
 │   ├── .plugin/
 │   │   └── plugin.json
-│   └── skills/
-│       └── ...
-├── changes/
-│   ├── 2026-04-15-session-reconnect/
-│   │   └── summary.md
-│   └── ...
-└── plan/
-    ├── 2026-04-15-session-reconnect/
-    │   ├── plan.md
-    │   └── tasks.md
+  ├── index.md
+  ├── readme.md
+  ├── docs/
+  │   ├── agent-host-protocol.md
+  │   ├── agent-host-session-handler.md
+  │   └── ...
+  ├── changes/
+  │   ├── 2026-04-15-session-reconnect/
+  │   │   └── summary.md
+  │   └── ...
+  ├── plan/
+  │   ├── 2026-04-15-session-reconnect/
+  │   │   ├── plan.md
+  │   │   └── tasks.md
+  │   └── ...
+  └── skills/
     └── ...
 ```
 
@@ -96,7 +96,7 @@ Ephemeral planning artifacts for the current session. Each session gets its own 
 
 These skills ship as part of the `vsckb` VS Code agent plugin in this repo, in the same Team Kit-style format used by `vscode-team-kit`. The repo-level `marketplace.json` points to `./vsckb/` as the plugin root. Installing the plugin registers the skills under the `vsckb` namespace, so they show up grouped in VS Code as `vsckb:plan`, `vsckb:implement`, etc.
 
-Each skill resolves the knowledge repo path from its own `SKILL.md` location — `KNOWLEDGE_REPO` is the directory three levels up from `vsckb/skills/<skill>/SKILL.md`. There's no init step, no setting, no symlink, no worktree.
+Each skill resolves the knowledge root from its own `SKILL.md` location — `KNOWLEDGE_REPO` is the directory two levels up from `vsckb/skills/<skill>/SKILL.md`, i.e. `vsckb/` itself. There's no init step, no setting, no symlink, no worktree.
 
 ### Write boundaries
 

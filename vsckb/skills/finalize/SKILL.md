@@ -11,7 +11,7 @@ This skill writes doc updates, a new `changes/` entry, removes the session's `pl
 
 ## Knowledge repo location
 
-This `SKILL.md` lives at `<KNOWLEDGE_REPO>/vsckb/skills/finalize/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory three levels up from this file. All knowledge reads, writes, and git operations happen against that path directly.
+This `SKILL.md` lives at `<KNOWLEDGE_REPO>/skills/finalize/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory two levels up from this file: the `vsckb` plugin root. All knowledge reads, writes, and git operations happen against that path directly.
 
 Re-derive `VSCODE_REPO` and `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
 

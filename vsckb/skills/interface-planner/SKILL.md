@@ -26,7 +26,7 @@ These two files are presented as a diff. The user reads the diff to understand w
 
 ## Knowledge repo location
 
-This `SKILL.md` lives at `<KNOWLEDGE_REPO>/vsckb/skills/interface-planner/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory three levels up from this file. All knowledge reads and writes happen against that path directly.
+This `SKILL.md` lives at `<KNOWLEDGE_REPO>/skills/interface-planner/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory two levels up from this file: the `vsckb` plugin root. All knowledge reads and writes happen against that path directly.
 
 Re-derive `VSCODE_REPO` and `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
 

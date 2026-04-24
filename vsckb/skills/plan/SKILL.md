@@ -11,7 +11,7 @@ This skill is informed by both the existing knowledge base **and** the VS Code s
 
 ## Knowledge repo location
 
-This `SKILL.md` lives at `<KNOWLEDGE_REPO>/vsckb/skills/plan/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory three levels up from this file. All knowledge reads and writes happen against that path directly.
+This `SKILL.md` lives at `<KNOWLEDGE_REPO>/skills/plan/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory two levels up from this file: the `vsckb` plugin root. All knowledge reads and writes happen against that path directly.
 
 Re-derive `VSCODE_REPO` and `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
 

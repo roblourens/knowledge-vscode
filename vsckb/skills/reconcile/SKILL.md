@@ -11,7 +11,7 @@ The trick: don't re-read every doc against every code reference. Use the VS Code
 
 ## Knowledge repo location
 
-This `SKILL.md` lives at `<KNOWLEDGE_REPO>/vsckb/skills/reconcile/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory three levels up from this file. All knowledge reads and writes happen against that path directly.
+This `SKILL.md` lives at `<KNOWLEDGE_REPO>/skills/reconcile/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory two levels up from this file: the `vsckb` plugin root. All knowledge reads and writes happen against that path directly.
 
 Re-derive `VSCODE_REPO` from `git rev-parse` against the workspace root.
 
