@@ -1,6 +1,6 @@
 # Agent Host Sessions Providers
 
-_Covers: src/vs/sessions/contrib/agentHost/browser/baseAgentHostSessionsProvider.ts, src/vs/sessions/contrib/agentHost/browser/localAgentHostSessionsProvider.ts, src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHostSessionsProvider.ts, src/vs/sessions/common/agentHostSessionsProvider.ts_
+_Covers: src/vs/sessions/contrib/agentHost/browser/baseAgentHostSessionsProvider.ts, src/vs/sessions/contrib/agentHost/browser/localAgentHostSessionsProvider.ts, src/vs/sessions/contrib/agentHost/browser/agentHostSettings.contribution.ts, src/vs/sessions/contrib/agentHost/browser/agentSessionSettings.contribution.ts, src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHostSessionsProvider.ts, src/vs/sessions/common/agentHostSessionsProvider.ts_
 
 `LocalAgentHostSessionsProvider` and `RemoteAgentHostSessionsProvider` are the Sessions app's view of Agent Host sessions. Both extend a shared abstract base, `BaseAgentHostSessionsProvider`, that owns ~all of the structural behaviour: the session cache, the three config caches, the lazy `ISessionState.config` subscription seeding, AHP notification/action handlers, `sendAndCreateChat`, and a single concrete `AgentHostSessionAdapter` (`ISession` implementation). The subclasses contribute only the bits that genuinely differ: which connection to use, how to label sessions, how to map session types ↔ resource schemes, how to pick a working folder, and (remote only) connection lifecycle. Both implement `IAgentHostSessionsProvider` (defined in `src/vs/sessions/common/agentHostSessionsProvider.ts`), which extends `ISessionsProvider` with the Agent Host extras the Sessions UI needs: dynamic session config, optional remote connection status, and an output channel id. The local provider talks to `IAgentHostService` (utility-process MessagePort); the remote provider talks to an `IRemoteAgentHostConnection` over WebSocket / SSH / tunnel relay.
 
@@ -77,13 +77,25 @@ Note: `_syncSessionTypesFromRootState(rootState)` is now **on the base** (was du
 
 **`update()` returns `boolean`.** Both refresh paths (`_refreshSessions` and the handlers) check the return of `adapter.update(metadata)` and only fire `onDidChangeSessions` when something actually changed. This was previously inconsistent across providers.
 
-## Dynamic session config: the three caches
+## Settings editor file-system providers
 
-The providers maintain three related caches that together drive the session-config picker:
+Next to the providers themselves, two sibling contributions expose AHP config as synthetic editable JSONC files in the workbench:
+
+- `agentSessionSettings.contribution.ts` + `agentSessionSettingsFileSystemProvider.ts` register the `agent-session-settings://` scheme with `IFileService` and contribute an "Open Session Settings" action under `SessionItemContextMenuId`. Opens a per-session synthetic JSONC document backed by the session's resolved `SessionConfigState` (schema + values). Saves are written back through the provider's `setSessionConfigValue` (mid-session `SessionConfigChanged`).
+- `agentHostSettings.contribution.ts` + `agentHostSettingsFileSystemProvider.ts` + `agentHostSettingsShared.ts` register the `agent-host-settings://` scheme and contribute an "Open Host Settings" action. Opens a host-level JSONC document backed by `RootState.config` (the new `RootConfigState`, see [agent-host-protocol](./agent-host-protocol.md)). Saves are written back via the host-level config dispatch path.
+
+Both contributions gate their menu `when` clauses on `ContextKeyExpr.regex(ChatSessionProviderIdContext.key, ANY_AGENT_HOST_PROVIDER_RE)` — the menu only shows for agent-host sessions.
+
+On the **server** side, both per-session and host-level config values now read through `IAgentConfigurationService.getEffectiveValue<D, K>` (`src/vs/platform/agentHost/node/agentConfigurationService.ts`), which owns the `session → parent subagent → host` inheritance chain. Provider-side reads on the renderer still go through the lazy-seeded `_runningSessionConfigs` cache as described below; the new service is what they see *behind* the wire.
+
+## Dynamic session config: the caches
+
+The providers maintain related caches that together drive the session-config picker:
 
 - `_newSessionConfigs: Map<sessionId, IResolveSessionConfigResult>` — for sessions being *created* in the welcome view. The picker writes values into this map as the user fills out the form.
-- `_runningSessionConfigs: Map<sessionId, IResolveSessionConfigResult>` — for sessions that are already running. Drives the picker that lives in the chat input toolbar.
+- `_runningSessionConfigs: Map<sessionId, IResolveSessionConfigResult>` — for sessions that are already running. Drives the picker that lives in the chat input toolbar. Values are typed `Record<string, unknown>` (widened from `Record<string, string>` once the protocol started carrying number/boolean/object config values).
 - `_sessionStateSubscriptions: DisposableMap<sessionId, IReference<IAgentSubscription<ISessionState>>>` — lazy AHP session-state subscriptions, used to seed `_runningSessionConfigs` on demand.
+- Plus host-level `RootConfigState` plumbing on the base for the host-settings editor (see [Settings editor file-system providers](#settings-editor-file-system-providers)).
 
 `getSessionConfig(sessionId)` returns `_newSessionConfigs.get(sessionId) ?? _runningSessionConfigs.get(sessionId)` and synchronously kicks off `_ensureSessionStateSubscription(sessionId)` for the running case. The `??` ordering matters: the new-session form must always win over a stale running entry while the user is creating a session.
 
@@ -107,7 +119,9 @@ Lazy seeding from `ISessionState.config` would be enough on its own *if the serv
 Two write sites in `src/vs/platform/agentHost/node/`:
 
 - **`agentService.ts` `createSession`** persists the **full resolved values** (`sessionConfig.values`) on session create. The "full resolved values" choice is deliberate: clients render the resolved config on restore and shouldn't have to re-resolve it. The persisted values are read back as the source of truth for what the session was *actually created with*. They are **not** fed back into `resolveSessionConfig` as overrides on restore — restore returns them as-is.
-- **`agentSideEffects.ts` `SessionConfigChanged`** persists `sessionState.config.values` verbatim each time the values change mid-session. Same rationale.
+- **`agentSideEffects.ts` `SessionConfigChanged`** persists `sessionState.config.values` verbatim each time the values change mid-session. Same rationale. The action now also carries an optional `replace?: boolean` — callers distinguish a full-values replacement (settings-editor save) from an incremental merge (single-property picker write); the persistence side stores whatever final shape the reducer produced.
+
+Server-side **reads** (e.g. when an agent asks "what is the current value of `autoApprove` for this session?") flow through `IAgentConfigurationService.getEffectiveValue` (`src/vs/platform/agentHost/node/agentConfigurationService.ts`), which combines per-session values, parent subagent values, and host-level `RootConfigState` values into a single answer. The provider-side renderer cache is still seeded from `ISessionState.config`, but the schema and value resolver now lives in the new service — reach for it (not the old per-call resolver) when adding a new well-known config key.
 
 On restore (`restoreSession`), the agent reads the persisted values out of the database and includes them in the next `ISessionState.config.values` snapshot. Both providers then see them through the lazy seed described above.
 
@@ -119,6 +133,7 @@ This was a previous reviewer suggestion to filter to user-mutable subsets only; 
 
 - `IAgentHostSessionsProvider` — the extended `ISessionsProvider` interface.
 - `isAgentHostProvider(provider)` — type guard used by callers like `openInVSCode.contribution.ts`.
+- `ANY_AGENT_HOST_PROVIDER_RE` — regex matching any agent-host provider id (`/^(local-agent-host|agenthost-)/`). Used by the new settings-editor contributions to gate their menu `when` clauses on `ChatSessionProviderIdContext`.
 - `resolvedConfigsEqual(a, b)` — shallow structural equality on `IResolveSessionConfigResult`. Compares value keys + values, then schema property keys. Schema property objects are compared by identity (they originate from the same protocol snapshot in the providers that use this helper).
 - `buildMutableConfigSchema(config)` — fallback schema-builder used by the (legacy) `_handleConfigChanged` path before lazy seeding hydrates.
 - `AUTO_APPROVE_ENUM` — shared enum used by both providers' picker config schemas.
@@ -141,7 +156,7 @@ When adding logic that has to be identical between local and remote, prefer exte
 - Remote-only behaviour (connection lifecycle, sticky auth-pending, well-known agent type mapping, remote folder picker) → `remoteAgentHost/browser/remoteAgentHostSessionsProvider.ts`.
 - Picker UI behavior → `src/vs/sessions/contrib/chat/browser/agentHost/agentHostSessionConfigPicker.ts` for the generic per-property picker; `src/vs/sessions/contrib/chat/browser/agentHost/` for the well-known `autoApprove` picker (see [agent-host-auto-approve-picker](./agent-host-auto-approve-picker.md)).
 - What gets persisted, when, and where the database lives → `src/vs/platform/agentHost/node/agentService.ts` (`createSession` / `restoreSession`) and `src/vs/platform/agentHost/node/agentSideEffects.ts` (`SessionConfigChanged`).
-- AHP wire shape (`ISessionState.config`, `ISessionConfigPropertySchema`) → see [agent-host-protocol](./agent-host-protocol.md).
+- AHP wire shape (`ISessionState.config`, `SessionConfigPropertySchema`) — see [agent-host-protocol](./agent-host-protocol.md).
 
 ## Related
 
@@ -175,3 +190,4 @@ When adding logic that has to be identical between local and remote, prefer exte
 - **2026-04-19** — `29c89294e9` — extracted `BaseAgentHostSessionsProvider` and `AgentHostSessionAdapter` to `src/vs/sessions/contrib/agentHost/browser/baseAgentHostSessionsProvider.ts`. Local provider went from full implementation to ~186 LOC subclass; remote went from 1457 LOC to 395 LOC. Local provider also moved into the same `agentHost` contrib folder as the new base (was its own `localAgentHost` contrib). Net ~880 LOC removed. Added gotchas for the layer-rule restriction on `vs/sessions/~` vs `vs/sessions/contrib/*/~`, the `i18n.resources.json` registration requirement, and the `_currentNewSession*` reset tuple. Old `localAgentHostSessionsProvider.ts:` debt/gotcha entries re-anchored to `baseAgentHostSessionsProvider.ts:`.
 - **2026-04-18** — `96ab46a042` — initial entry. Captures both Agent Host sessions providers (local + remote), the three-cache config picker model, lazy session-state subscription seeding, the persistence/restore bridge through `AgentService` + `AgentSideEffects`, and the shared `resolvedConfigsEqual` helper. Records the deliberate "persist full resolved values" decision and the refcounted-subscription gotcha.
 - **2026-04-21** — `ad531180d0` — reconciliation: fixed stale doc references to the moved session-config integration test and the generic session-config picker path; no covered provider commits since `7bc767483b` changed the provider architecture.
+- **2026-04-24** — `5407371c47` — reconciliation: documented two new sibling contributions — `agentSessionSettings.contribution.ts` (per-session `agent-session-settings://` synthetic JSONC editor) and `agentHostSettings.contribution.ts` (host-level `agent-host-settings://` editor for the new `RootConfigState`) — along with the new `IAgentConfigurationService.getEffectiveValue` server-side resolver that owns the session→subagent→host inheritance chain (commits `779b23b6196`, `1453f5b4e9b`, `2289e091159`). Widened `_runningSessionConfigs` value type to `Record<string, unknown>` and noted the new `replace?: boolean` flag on `SessionConfigChanged`. Added `ANY_AGENT_HOST_PROVIDER_RE` to the shared-helpers list. Updated `Covers:` to include the two new contributions.

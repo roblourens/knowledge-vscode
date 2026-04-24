@@ -8,13 +8,13 @@ _Covers: src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHost
 
 For each chat session backed by an Agent Host, the handler:
 
-- **Creates and subscribes** to the backend session (via `IAgentConnection`), translating the workbench-side session id ↔ canonical AHP session URI (`copilot:/<rawId>` etc.).
+- **Creates and subscribes** to the backend session (via `IAgentConnection`), translating the workbench-side session id ↔ canonical AHP session URI (`copilot:/<rawId>` etc.). Session creation now passes the active client atomically (`createSession({ …, activeClient })`) instead of dispatching a separate `ActiveClientChanged` after the session is created.
 - **Converts chat requests into `session/turnStarted`** dispatches.
 - **Renders state into chat history and progress** by adapting `ISessionState` updates into chat content parts and progress messages.
 - **Handles active-turn reconnection** — if the workbench reattaches mid-turn (after reload, host change, or network blip), the handler resumes rendering from the protocol's replay/snapshot.
 - **Handles server-initiated turns** — turns the agent starts on its own, not in response to a user message.
 - **Dispatches cancellations** back through the protocol.
-- **Renders permission prompts** (tool/file approvals) as VS Code permission UI and forwards the user's choice back as an action.
+- **Renders permission prompts** (tool/file approvals) as VS Code permission UI and forwards the user's choice back as an action. When the server includes `ConfirmationOption[]` on a confirmation action/state, the handler surfaces those choices (e.g. "Allow Once" / "Allow in this Session") instead of plain approve/deny and echoes back `selectedOptionId` on the answer.
 - **Hosts client tools** — tools the workbench provides to the session (allowlist controlled via `chat.agentHost.clientTools`); see `agentHostClientTools.ts`.
 - **Coordinates file edits** through `AgentHostEditingSession` (`agentHostEditingSession.ts`), which adapts AHP file-edit content into chat editing/checkpoint behavior and uses the Agent Host filesystem connection to read/write snapshots.
 - **Coordinates terminals** via terminal state subscriptions and terminal actions on the connection.
@@ -54,6 +54,8 @@ Lifecycle controls that are local-only (restart, dev-mode startup) live on `IAge
 Code that *runs a turn* belongs in the handler. Code that *changes how a turn is displayed* belongs in the handler's adapter helpers (e.g., `stateToProgressAdapter.ts`). Code that *changes the protocol contract* belongs in [agent-host-protocol](./agent-host-protocol.md), not here.
 
 If a behavior could be expressed as a protocol action and reducer change, prefer that — handler-only state tends to drift across local/remote and across multi-client scenarios.
+
+`stateToProgressAdapter.ts` also marks tool invocations as `presentation: Hidden` when the result carries file edits, so the edit pills rendered through `AgentHostEditingSession` aren't duplicated by the generic tool-call widget. If you add a new tool kind that produces edits, route the edit rendering through the editing session and keep the tool widget hidden the same way.
 
 ## Request context and client-tool parity
 
@@ -143,3 +145,4 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 - **2026-04-19** — `2935e7d695` — added "Subagent rendering" section covering buffering, deferred `_toolCallAgents` registration, independent `description`/`agentName` updates in `chatSubagentContentPart.ts`, and parent-without-child cleanup. Cross-linked the new testing doc and added subagent-related test references.
 - **2026-04-20** — `00f882a16c` — updated the example `provider:` value in the `IAgentHostSessionHandlerConfig` snippet from `'copilot'` to `'copilotcli'` (`CopilotAgent.id` rename).
 - **2026-04-21** — `ad531180d0` — reconciliation: documented the `AgentHostChatSession.dispose()` ordering fix from `cf0709667ed`; the merge commit in the same range did not change handler concepts beyond that fix.
+- **2026-04-24** — `5407371c47` — reconciliation: noted server-provided `ConfirmationOption[]` rendering on tool-call confirmations (commit `779b23b6196`), the eager `activeClient` parameter on `createSession` replacing the post-create `ActiveClientChanged` round-trip (`886c556841c`), and the `presentation: Hidden` flag on file-edit tool invocations to avoid duplicate edit pills (`e85baae4d67`). PostToolUse hook fix (`59be36b6d53`) and deferred repo-hook loading (`dd1eb813ec4`) are server/sessions-provider-side and don't change the handler's prose.

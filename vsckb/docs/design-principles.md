@@ -56,3 +56,4 @@ Push back on protocol or API shapes that put a concept at the wrong layer, mirro
 ## Changelog
 
 - **2026-04-23** — f32a933746 — initial design principles distilled from the knowledge-base design interview; added terminology for Agent Host, extension-host Copilot CLI, and the original VS Code agent
+- **2026-04-24** — `5407371c47` — reconciliation: no doc changes. The session-settings and host-level configuration cluster (`779b23b6196`, `1453f5b4e9b`, `2289e091159`), the file moves under `extensions/copilot/.../chatSessions/copilotcli/` (`d90a8a752f0`), and the Copilot-CLI mission-control / refactor commits (`e2796aaef91`, `392ff04cf78`) are good concrete instances of the existing principles ("put truth at the layer that owns it", terminology for the extension-host Copilot CLI) but don't change them. Account-policy gating (`f67b2976016`) is a workbench-side feature that doesn't touch agent-host design.

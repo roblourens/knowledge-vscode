@@ -46,11 +46,13 @@ Per [agent-host-topology](./agent-host-topology.md), property names in AHP sessi
 For VS Code to render the unified picker (with its built-in warning dialogs, autopilot gating, policy enforcement, and "Learn more about permissions" link), the agent must advertise `autoApprove` with this **shape**:
 
 - `type: 'string'`
-- `enum: string[]` containing at least `'default'`, all values being a subset of `{'default', 'autoApprove', 'autopilot'}` (`autopilot` is optional — agents may choose not to expose it)
+- `enum: string[]` containing at least `'default'`, all values being a subset of `KNOWN_AUTO_APPROVE_VALUES` (`{'default', 'autoApprove', 'autopilot'}`).
 
-`isWellKnownAutoApproveSchema(schema)` (exported from `agentHostPermissionPickerDelegate.ts`) is the predicate. Agents that advertise `autoApprove` with a *different* shape (extra enum values, different type) **do not** get the unified picker — they fall back to the generic per-property picker in `agentHostSessionConfigPicker.ts`. This is intentional: a hostile or legacy agent can't trick the unified picker into rendering against an unsupported schema, and a non-conforming agent isn't left with no UI at all.
+`isWellKnownAutoApproveSchema(schema)` (exported from `agentHostPermissionPickerDelegate.ts`) is the predicate; it imports the value set `KNOWN_AUTO_APPROVE_VALUES` and the property name `SessionConfigKey.AutoApprove` from `src/vs/platform/agentHost/common/sessionConfigKeys.ts` — the platform-side source of truth for well-known config keys (`AutoApprove`, `Permissions`, `Isolation`, `Branch`, `BranchNameHint`). Agents that advertise `autoApprove` with a *different* shape (extra enum values, different type) **do not** get the unified picker — they fall back to the generic per-property picker in `agentHostSessionConfigPicker.ts`. This is intentional: a hostile or legacy agent can't trick the unified picker into rendering against an unsupported schema, and a non-conforming agent isn't left with no UI at all.
 
-The constant `AUTO_APPROVE_PROPERTY = 'autoApprove'` is the single source of truth for the property name and is exported from the delegate file.
+The property name itself is `SessionConfigKey.AutoApprove` (`'autoApprove'`); there is no longer a separate `AUTO_APPROVE_PROPERTY` constant in the delegate — the platform-side enum is the single source of truth, and the delegate is now a consumer of it.
+
+> Note: `SessionConfigPropertySchema` is no longer string-enum-only — the protocol now expresses `string` / `number` / `boolean` / `array` / `object` schemas with `items` / `properties` / `required`. The recognition predicate still narrows to the string-enum case because that's what the unified picker UI knows how to render; everything else flows into the generic per-property picker.
 
 ## Wiring the two factories
 
@@ -92,7 +94,7 @@ The tests use a fake provider and exercise the delegate in isolation. The widget
 
 - [agent-host-topology](./agent-host-topology.md) — the "well-known property names" convention this picker hangs off of.
 - [agent-host-sessions-providers](./agent-host-sessions-providers.md) — `IAgentHostSessionsProvider.getSessionConfig` / `setSessionConfigValue` / `onDidChangeSessionConfig`, which back the delegate.
-- [agent-host-protocol](./agent-host-protocol.md) — `ISessionConfigPropertySchema` shape and the session-state subscription model.
+- [agent-host-protocol](./agent-host-protocol.md) — `SessionConfigPropertySchema` shape and the session-state subscription model.
 
 ## Debt & gotchas
 
@@ -104,3 +106,4 @@ The tests use a fake provider and exercise the delegate in isolation. The widget
 
 - **2026-04-20** — `7f8e7e0f0c` — initial entry. Captures the two-widget split (`PermissionPicker` for `NewSessionControl`, `PermissionPickerActionItem` for `ChatInputSecondary`), the shared `AgentHostPermissionPickerDelegate`, the well-known `autoApprove` schema convention and recognition predicate, the fallback to the generic per-property picker for non-conforming agents, and the reactive-visibility pattern needed for action-view-item factories.
 - **2026-04-21** — `ad531180d0` — reconciliation: updated delegate-shape notes after `9a5b0119f0c` added workbench-only extension-contributed permission groups to `PermissionPickerActionItem`; `d844c098294` added tap handling to the sessions picker but did not change the agent-host architecture.
+- **2026-04-24** — `5407371c47` — reconciliation: well-known config keys moved to `src/vs/platform/agentHost/common/sessionConfigKeys.ts` (`SessionConfigKey.AutoApprove`, `KNOWN_AUTO_APPROVE_VALUES`) as the platform-side source of truth; the delegate's own `AUTO_APPROVE_PROPERTY` constant is gone (commit `1453f5b4e9b`). Noted that `SessionConfigPropertySchema` widened beyond string-enum (now `string|number|boolean|array|object` with `items`/`properties`/`required`) and that the recognition predicate still narrows to string-enum on purpose. Centralized agent-host schema descriptors now live in `agentHostSchema.ts` and are composed by `copilotAgent.resolveSessionConfig`.
