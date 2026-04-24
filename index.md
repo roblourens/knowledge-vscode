@@ -4,7 +4,7 @@ The entry point for the VS Code agent host knowledge base. Read this file first 
 
 ## What this knowledge base covers
 
-The VS Code **agent host** is the subsystem that hosts AI coding agents (Copilot, Claude, mocks, and remote/SSH/tunnel-relayed agents) inside VS Code. It owns:
+The VS Code **agent host** is a subsystem that hosts AI coding agents (Copilot, Claude, mocks, and remote/SSH/tunnel-relayed agents) inside VS Code. It owns:
 
 - An **Agent Host Protocol (AHP)** — JSON-RPC + immutable state — that decouples the protocol layer from any specific agent or client.
 - A **local Agent Host process** (utility process on desktop) that implements the server side of AHP for the built-in agents.
@@ -14,12 +14,12 @@ The VS Code **agent host** is the subsystem that hosts AI coding agents (Copilot
 
 Docs in this knowledge base are scoped to *one component or concern* each, with a `Covers:` line declaring the VS Code paths the doc is primarily concerned with. Use the `Covers:` lists below to find the right doc for a task; follow inline cross-references inside docs to reach adjacent context.
 
-## Start here: the defining property and the principles
+## Start here: design principles and topology
 
-Before reading any component-level doc, internalize two things from [agent-host-topology](docs/agent-host-topology.md):
+Before reading any component-level doc, internalize two things:
 
-1. **The agent runs without a client. The client is a viewer/controller that comes and goes.** This single property explains why the host is a long-lived process, why state + reducers + `serverSeq` exists, why file edits land where the agent runs, and why multi-client correctness is a corollary rather than the goal.
-2. **The eight Principles** at the bottom of that doc — generic by construction; design for the spec and the in-tree consumer; greenfield velocity over back-compat; agent-autonomous; state+reducers for session state but commands for service RPCs; protocol-level uniformity over SDK fidelity; layering over collapsing; pragmatism over purity.
+1. **The [design principles](docs/design-principles.md)** — the top-level agent-behavior guidance for protocol shape, Copilot/SDK evidence, pre-v1 breaking changes, state ownership, UI adapters, testing, and when to ask the user.
+2. **The [topology](docs/agent-host-topology.md)** — where the code lives, how the layers relate, and the concrete decision tree for placing new code.
 
 For the AHP-vs-ACP question ("why a new protocol?"), see the sibling repo's [docs/guide/ahp-and-acp.md](https://github.com/microsoft/agent-host-protocol/blob/main/docs/guide/ahp-and-acp.md): AHP is a coordination layer for N clients sharing a host; ACP is 1:1 communication between a client and an agent. They compose; today our first-party agents (Copilot, future Claude) sit in-process as `IAgent` implementations rather than via ACP.
 
@@ -34,7 +34,8 @@ For the AHP-vs-ACP question ("why a new protocol?"), see the sibling repo's [doc
 
 Read in this order if you're new — each one assumes the previous.
 
-- [agent-host-topology](docs/agent-host-topology.md) — **start here.** The orientation doc: AHP's generic-protocol philosophy ("neither side is VS Code") and its corollary ("but design for the spec and our in-tree client, not theoretical external ones"), the two sanctioned convention exceptions (well-known config property names; tool-call kinds + metadata), the two-app topology (VS Code app vs Agents app, the latter still rooted at `src/vs/sessions/`), the three deployment configurations, remote host scoping in the Agents app, and the where-to-put-new-code decision tree. _Covers: src/vs/platform/agentHost/, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostChatContribution.ts, src/vs/sessions/contrib/remoteAgentHost/, src/vs/sessions/contrib/sessions/browser/views/sessionsList.ts, src/vs/sessions/contrib/chat/browser/scopedWorkspacePicker.ts_
+- [design-principles](docs/design-principles.md) — top-level Agent Host design values and terminology for future coding agents: AHP should model agentic coding concepts independently of VS Code UI and Copilot SDK shapes; Copilot product pressure and the mature extension-host CLI teach the protocol without owning it; pre-v1 breaking changes are allowed to fix wrong shapes; durable truth belongs in AHP state; validate behavior at the layer where the contract lives. Defines what Rob means by Agent Host, extension-host Copilot CLI, and the original VS Code agent. _Covers: src/vs/platform/agentHost/, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/, src/vs/sessions/contrib/agentHost/, src/vs/sessions/contrib/remoteAgentHost/, extensions/copilot/src/extension/chatSessions/copilotcli/, extensions/copilot/src/extension/conversation/vscode-node/chatParticipants.ts, extensions/copilot/src/platform/chat/common/chatAgents.ts_
+- [agent-host-topology](docs/agent-host-topology.md) — the orientation doc: AHP's generic-protocol philosophy ("neither side is VS Code") and its corollary ("but design for the spec and our in-tree client, not theoretical external ones"), the two sanctioned convention exceptions (well-known config property names; tool-call kinds + metadata), the two-app topology (VS Code app vs Agents app, the latter still rooted at `src/vs/sessions/`), the three deployment configurations, remote host scoping in the Agents app, and the where-to-put-new-code decision tree. _Covers: src/vs/platform/agentHost/, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostChatContribution.ts, src/vs/sessions/contrib/remoteAgentHost/, src/vs/sessions/contrib/sessions/browser/views/sessionsList.ts, src/vs/sessions/contrib/chat/browser/scopedWorkspacePicker.ts_
 - [agent-host-protocol](docs/agent-host-protocol.md) — the AHP wire contract: state, actions, reducers, capabilities, subscriptions, action envelopes, and how the generated `state/protocol/` source relates to the sibling `agent-host-protocol` repo. _Covers: src/vs/platform/agentHost/common/state/_
 - [copilot-agent-provider](docs/copilot-agent-provider.md) — the local Copilot Agent Host provider: SDK client lifecycle, session create/resume/list, per-session database metadata, and the database-existence ownership gate for filtering SDK sessions. _Covers: src/vs/platform/agentHost/node/copilot/copilotAgent.ts, src/vs/platform/agentHost/test/node/copilotAgent.test.ts_
 - [agent-host-session-handler](docs/agent-host-session-handler.md) — `AgentHostSessionHandler`, the shared adapter between AHP session state and VS Code chat sessions: turn dispatch, progress rendering, active-turn reconnect, server-initiated turns, permissions, client tools, file edits, terminals, subagents, auth retries, customization refs. _Covers: src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostSessionHandler.ts_

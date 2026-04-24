@@ -23,6 +23,8 @@ Make sure the knowledge repo is up to date too: `git -C "$KNOWLEDGE_REPO" pull -
 
 ## Workflow
 
+Before walking docs, read `$KNOWLEDGE_REPO/index.md` and `$KNOWLEDGE_REPO/docs/design-principles.md`. Use the principles doc to preserve intentional design philosophy while reconciling drift, but do not invent new principles during reconcile unless a code change being documented clearly introduced one.
+
 ### 1. Walk the docs
 
 For each `*.md` under `$KNOWLEDGE_REPO/docs/`:

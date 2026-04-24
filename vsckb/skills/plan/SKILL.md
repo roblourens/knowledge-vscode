@@ -25,7 +25,7 @@ This is iterative, not linear. Cycle through these phases as the conversation ev
 
 ### 1. Orient
 
-- Read `$KNOWLEDGE_REPO/index.md`, including the `## Active debt & gotchas` section.
+- Read `$KNOWLEDGE_REPO/index.md` and `$KNOWLEDGE_REPO/docs/design-principles.md`, including the index's `## Active debt & gotchas` section.
 - Read every doc under `docs/` whose `Covers:` line overlaps with the user's request. Don't summarize them in the plan — quote or link to specific sections. Always read the doc's `## Debt & gotchas` section: `gotcha:` entries constrain the design (don't propose changes that fight load-bearing weirdness), `debt:` entries flag adjacent rough edges that the planned change may want to fix or avoid making worse.
 - Skim the most recent two or three `changes/` entries that touch the same subsystem; if any are relevant, read their `summary.md` for narrative.
 

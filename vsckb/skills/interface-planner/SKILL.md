@@ -60,10 +60,11 @@ While running, this skill may **only** create or modify files under `$KNOWLEDGE_
 ### Phase 2: Explore and Extract Current Interfaces
 
 1. Pick `SESSION_SLUG = YYYY-MM-DD-<short-description>` and create `$KNOWLEDGE_REPO/plan/$SESSION_SLUG/`.
-2. Search the codebase to identify the relevant source files: interfaces, types, classes, services, and consumers affected by the change.
-3. Read those files. Focus on the public API surface: exported interfaces, type aliases, class signatures, public/protected methods and properties, enums, and important constants.
-4. Follow the import graph one level out. If the interfaces being changed are consumed by or extended from other interfaces, include those too so the user can see ripple effects.
-5. Write `$KNOWLEDGE_REPO/plan/$SESSION_SLUG/_plan_current.d.ts`. This file should contain:
+2. Read `$KNOWLEDGE_REPO/index.md` and `$KNOWLEDGE_REPO/docs/design-principles.md` so the proposed interface shape follows the Agent Host design values before you extract signatures.
+3. Search the codebase to identify the relevant source files: interfaces, types, classes, services, and consumers affected by the change.
+4. Read those files. Focus on the public API surface: exported interfaces, type aliases, class signatures, public/protected methods and properties, enums, and important constants.
+5. Follow the import graph one level out. If the interfaces being changed are consumed by or extended from other interfaces, include those too so the user can see ripple effects.
+6. Write `$KNOWLEDGE_REPO/plan/$SESSION_SLUG/_plan_current.d.ts`. This file should contain:
    - An `/* eslint-disable */` comment at the top.
    - A header comment with the date and the files it was extracted from.
    - All relevant interfaces, types, class signatures, and enums.

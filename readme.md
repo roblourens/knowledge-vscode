@@ -80,6 +80,8 @@ The changelog SHAs reference whatever commit was HEAD on the working branch at t
 
 Docs describe how things *are* and *why*, not how they *should be*. Prescriptive how-to-work-with-this-component notes belong in the relevant doc itself — there's no separate task-guide layer.
 
+`docs/design-principles.md` is the top-level exception: it captures durable Agent Host design values and agent-behavior guidance that apply across component docs. Skills read it during orientation so future agents apply the same protocol/domain judgment under ambiguity.
+
 ### `changes/`
 
 A log of completed work. One subfolder per significant conversation or feature, named with a date prefix and a short description (e.g., `2026-04-15-session-reconnect/`). Each contains a `summary.md` that records what was done, key decisions, what went wrong or was misunderstood, and what was learned. Append-only history.

@@ -25,7 +25,7 @@ Re-derive `VSCODE_REPO` and `VSCODE_BRANCH` from `git rev-parse` against the wor
 
 ### 1. Orient
 
-- Read `$KNOWLEDGE_REPO/index.md`, including the `## Active debt & gotchas` section if there's anything there relevant to the question.
+- Read `$KNOWLEDGE_REPO/index.md` and `$KNOWLEDGE_REPO/docs/design-principles.md`, including the index's `## Active debt & gotchas` section if there's anything there relevant to the question.
 - Read every doc under `docs/` whose `Covers:` line overlaps with the user's question. Always read the doc's `## Debt & gotchas` section — it captures load-bearing weirdness and known issues that often answer the user's question directly or change which approach is viable.
 - Skim the most recent two or three `changes/` entries that touch the same subsystem if they look pertinent.
 

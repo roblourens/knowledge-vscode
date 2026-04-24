@@ -31,6 +31,8 @@ The empty folder is enough to mark the session for `finalize`. You don't need to
 
 ### 2. Load context
 
+Read `$KNOWLEDGE_REPO/index.md` and `$KNOWLEDGE_REPO/docs/design-principles.md` before choosing implementation shape. The principles doc is agent-behavior guidance: apply it when the code and component docs leave more than one plausible path.
+
 If `$KNOWLEDGE_REPO/plan/$SESSION_SLUG/plan.md` exists:
 
 - Read both `plan.md` and `tasks.md` in full.

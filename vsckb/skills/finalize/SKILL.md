@@ -42,6 +42,8 @@ If the rebase fails (concurrent finalize from another session touched the same d
 
 **This is the most important step. Do it before writing anything else.** The point of the knowledge base is to make the *next* session avoid the mistakes of *this* one. If a finalize doesn't surface those mistakes, the knowledge base doesn't compound.
 
+Read `$KNOWLEDGE_REPO/index.md` and `$KNOWLEDGE_REPO/docs/design-principles.md` before the retrospective. Use the principles doc as a checklist: did this session reveal a new reusable principle, violate an existing one, or produce a decision that belongs in `changes/` rather than docs?
+
 Read the full conversation history of this session and the `## Discoveries for finalize` section of `tasks.md` (if `implement` was used). Look explicitly for:
 
 - **Wrong initial assumptions** — what did you (or the user) initially believe about the code that turned out to be false? What made you believe it? (Misleading doc, misleading symbol name, misleading comment, plausible-but-wrong analogy from another part of the codebase.)
