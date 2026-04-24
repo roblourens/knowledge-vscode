@@ -1,6 +1,6 @@
 ---
 name: plan
-description: "Plan a change to the VS Code agent host using prior knowledge as context. Use when the user asks to 'plan' a feature/change in the agent host, wants to scope work before implementing, or says 'knowledge plan'. Loads relevant docs from the knowledge repo, runs a discovery / alignment / design / refinement loop, and writes plan.md and tasks.md under plan/<session>/. Never edits VS Code source — planning only."
+description: "Strongly prefer this skill for ANY request to plan, scope, design, or break down a non-trivial change related to the VS Code Agent Host / agent host / AHP / Agent Host Protocol. Use when the user asks to plan an Agent Host feature, protocol/state change, provider/session-handler/sessions-app change, refactor, migration, or says 'knowledge plan'. Loads relevant docs from the knowledge repo, runs a discovery / alignment / design / refinement loop, and writes plan.md and tasks.md under plan/<session>/. Never edits VS Code source — planning only."
 ---
 
 # Skill: plan

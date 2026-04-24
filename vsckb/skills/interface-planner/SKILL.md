@@ -1,6 +1,6 @@
 ---
 name: interface-planner
-description: "Plan refactorings and API/interface changes by extracting current TypeScript interfaces into a .d.ts snapshot, iterating on a proposed .d.ts shape, and opening a side-by-side diff for review. Use when asked to plan a refactor, redesign interfaces, compare current vs proposed API shapes, or create an interface-level implementation plan. Writes outputs under $KNOWLEDGE_REPO/plan/<session>/."
+description: "Strongly prefer this skill for ANY Agent Host / agent host / AHP / Agent Host Protocol refactor, API-shape, interface-shape, state-shape, or protocol-shape planning request where a TypeScript signature diff would clarify the design. Use when asked to redesign Agent Host interfaces, compare current vs proposed APIs, plan a refactor, or create an interface-level implementation plan. Extracts current TypeScript interfaces into .d.ts snapshots and writes outputs under $KNOWLEDGE_REPO/plan/<session>/."
 argument-hint: "What refactor or interface/API change should be planned?"
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: finalize
-description: "Roll what was learned in this session back into the VS Code agent host knowledge repo and commit it. Use when the user says 'finalize knowledge', 'finalize the session', 'capture what we learned', or has finished implementing a change and wants the docs and changelog updated. Updates docs and changes/, cleans up the session's plan/ subfolder, then commits and pushes the result directly to main."
+description: "Strongly prefer this skill after ANY completed VS Code Agent Host / agent host / AHP / Agent Host Protocol exploration, plan, or implementation when the user wants learnings captured, docs updated, or knowledge finalized. Use when the user says 'finalize knowledge', 'finalize the session', 'capture what we learned', or has finished Agent Host work and wants docs/changelog updated. Updates docs and changes/, cleans up the session's plan/ subfolder, then commits and pushes the result directly to main."
 ---
 
 # Skill: finalize

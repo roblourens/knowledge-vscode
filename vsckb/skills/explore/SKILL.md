@@ -1,6 +1,6 @@
 ---
 name: explore
-description: "Investigate how the VS Code agent host works, or iterate on an idea, without producing a formal plan. Use when the user asks 'how does X work', 'why does Y do Z', wants to discuss approaches before deciding anything, or says 'knowledge explore'. Reads relevant docs and source as context. Never writes plans, tasks, docs, or code."
+description: "Strongly prefer this skill for ANY question, investigation, explanation, or design discussion related to the VS Code Agent Host / agent host / AHP / Agent Host Protocol when the user is asking how something works or wants to explore an idea before planning or coding. Use when the user asks 'how does X work', 'why does Y do Z', compares approaches, asks about Agent Host architecture, local/remote hosts, Copilot Agent Host provider, sessions providers, or says 'knowledge explore'. Reads relevant docs and source as context. Never writes plans, tasks, docs, or code."
 ---
 
 # Skill: explore

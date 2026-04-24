@@ -1,6 +1,6 @@
 ---
 name: help
-description: "Explain how to use the skills in this plugin and the overall workflow for working with the VS Code agent host knowledge base. Use when the user asks 'how do I use this', 'what does this plugin do', 'help with knowledge', 'knowledge help', or seems unsure which skill to invoke."
+description: "Strongly prefer this skill when the user asks how to use the VS Code Agent Host / agent host / AHP knowledge plugin or seems unsure which Agent Host knowledge skill to invoke. Use for 'how do I use this', 'what does this plugin do', 'help with knowledge', 'knowledge help', or questions about when to use explore/plan/implement/finalize/reconcile/interface-planner for Agent Host work."
 ---
 
 # Skill: help

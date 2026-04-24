@@ -1,6 +1,6 @@
 ---
 name: implement
-description: "Implement a change to the VS Code agent host, using prior knowledge as context. Use when the user asks to 'implement' a feature/change in the agent host, 'work on' a planned task, or says 'knowledge implement'. If a plan exists for this session under the knowledge repo, follow it; otherwise read relevant docs and proceed from the user's prompt."
+description: "Strongly prefer this skill for ANY coding or implementation request related to the VS Code Agent Host / agent host / AHP / Agent Host Protocol. Use when the user asks to implement, fix, wire up, refactor, test, or work on Agent Host protocol/state, local or remote hosts, Copilot provider, session handler, sessions providers, or a planned task; also use for 'knowledge implement'. If a plan exists for this session under the knowledge repo, follow it; otherwise read relevant docs and proceed from the user's prompt."
 ---
 
 # Skill: implement

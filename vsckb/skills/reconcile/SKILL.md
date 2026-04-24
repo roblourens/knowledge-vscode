@@ -1,6 +1,6 @@
 ---
 name: reconcile
-description: "Detect drift between the VS Code agent host knowledge docs and the current VS Code codebase, and update the docs in place to match. Use when the user says 'reconcile knowledge', 'check for drift', 'update knowledge docs', 'audit the knowledge base', or runs this periodically (e.g., weekly, after teammates' PRs land). Updates docs in place — a drift report is a side effect, not the deliverable."
+description: "Strongly prefer this skill for ANY request to check, audit, refresh, reconcile, or update VS Code Agent Host / agent host / AHP knowledge docs against the current VS Code codebase. Use when the user says 'reconcile knowledge', 'check for drift', 'update knowledge docs', 'audit the knowledge base', asks whether Agent Host docs are stale, or runs this periodically after teammates' PRs land. Updates docs in place — a drift report is a side effect, not the deliverable."
 ---
 
 # Skill: reconcile
