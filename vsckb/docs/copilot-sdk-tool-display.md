@@ -42,6 +42,14 @@ Path comparison normalizes separators by routing both sides through `URI.file()`
 
 The `pwsh &&`→`;` rewriting and the sandbox/background-detach behavior the workbench has are out of scope here. This helper only handles the redundant `cd` prefix.
 
+## History replay and reasoning order
+
+`mapSessionEvents.ts` converts raw SDK session-history events into `IAgentXxx` event shapes for the rest of the Agent Host pipeline. Each SDK event type (`message`, `tool_start`, `tool_complete`, `tool_call`, etc.) maps 1:1 to a typed event; `reasoningText` on a `message` event is forwarded directly onto `IAgentMessageEvent.reasoningText`.
+
+`AgentService._buildTurnsFromMessages` (and `_buildSubagentTurns`) then consumes these mapped events and builds `IAgentTurn` objects with `ResponsePart[]` arrays. For assistant messages, reasoning **must** come before the markdown content in the parts array — that is the order the model streams them live (`onReasoning`/`onReasoningDelta` arrive before `onMessage`), and the restore path must match. The rule: if `msg.reasoningText` is set, push a `ResponsePartKind.Reasoning` part before the `ResponsePartKind.Markdown` part.
+
+The extension-host Copilot CLI applies the same pattern for history replay: `reasoningText && parts.push({type:"reasoning",...}); content && parts.push({type:"text",...})`.
+
 ## Debt & gotchas
 
 - **debt** (2026-04-21, copilotToolDisplay.ts) — specialized Copilot CLI tools such as `exit_plan_mode`, `create_pull_request`, `skill`, and `update_todo` are not normalized in Agent Host display/result handling. Preserve structured semantics if these SDK tools are expected in Agent Host sessions.
@@ -53,6 +61,7 @@ The `pwsh &&`→`;` rewriting and the sandbox/background-detach behavior the wor
 - **gotcha** (2026-04-22, commandLineHelpers.ts:stripRedundantCdPrefix) — comparing a path extracted from a model-emitted command line against the session `workingDirectory: URI` MUST go through `URI.file(...)` + `extUriBiasedIgnorePathCase.isEqual`, not raw `fsPath` string comparison. On Windows, raw string comparison silently misses common forward-slash paths.
 - **gotcha** (2026-04-22, copilotToolDisplay.ts:getInvocationMessage/getPastTenseMessage) — these two functions come in mirrored pairs. Every per-tool branch in `getInvocationMessage` has a matching branch in `getPastTenseMessage`. When adding or tweaking a display variant, touch both.
 - **gotcha** (2026-04-22, copilotToolDisplay.ts) — when adding or changing how a Copilot SDK tool's args are formatted into invocation messages, check the Copilot CLI extension's parallel `formatXxxInvocation` helper in `extensions/copilot/src/extension/chatSessions/copilotcli/common/copilotCLITools.ts` for the parity baseline. The extension has its own bugs: both `formatViewToolInvocation` and `formatShowFileInvocation` silently mishandle the `[N, -1]` EOF sentinel for `view_range`; the Agent Host version is allowed to do better.
+- **gotcha** (2026-04-25, mapSessionEvents.ts / IAgentReasoningEvent) — `assistant.reasoning` SDK events exist in the TypeScript types but are not emitted in practice (verified across real `.copilot/session-state/*/events.jsonl` files). Reasoning is always bundled as `reasoningText` on `assistant.message` events. Do not add a separate `assistant.reasoning` handling path — the events will not arrive, the code will silently do nothing, and the type system will compile fine the whole time.
 
 ## Related
 
@@ -63,4 +72,5 @@ The `pwsh &&`→`;` rewriting and the sandbox/background-detach behavior the wor
 
 ## Changelog
 
+- **2026-04-25** — ee4918858d — added "History replay and reasoning order" section; added gotcha for `assistant.reasoning` events never being emitted in practice
 - **2026-04-24** — 4b6403a3ab — split tool display, SDK event display mapping, and shell command display rewriting out of the Copilot provider overview
