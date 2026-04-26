@@ -84,6 +84,7 @@ Protocol-generated types do **not** carry an `I` prefix. The shapes generated un
 - `AgentSession.provider` / `id` / `uri` — helpers for canonical backend session URIs.
 - `InitializeParams.locale` — BCP 47 locale the client passes during `initialize`, so the server can localize confirmation labels and other server-emitted strings.
 - Session config values are typed `Record<string, unknown>` (widened from `Record<string, string>`); `SessionConfigChanged` carries an optional `replace?: boolean` to distinguish merge vs full replacement.
+- `SessionState._meta?: Record<string, unknown>` — generic well-known-keyed metadata slot, dispatched by `SessionMetaChanged` and applied by `setSessionMeta` server-side. Used today for the `git` slot (`SESSION_META_GIT_KEY`, with `ISessionGitState` shape and `readSessionGitState` / `withSessionGitState` helpers in `sessionState.ts`) so server-computed git state can ride along with normal session-state subscriptions instead of needing a bespoke command. Add new well-known keys here rather than expanding the typed `SessionState` surface when a field is conceptually optional, server-computed, and well-known by string key.
 
 ## Where to edit
 
@@ -112,6 +113,7 @@ Protocol-generated types do **not** carry an `I` prefix. The shapes generated un
 
 ## Changelog
 
+- **2026-04-25** — `8e9b24cedf` — documented the `SessionState._meta` well-known-keyed slot and the first well-known key `git` (`SESSION_META_GIT_KEY`, `ISessionGitState`, `readSessionGitState` / `withSessionGitState` in `sessionState.ts`), dispatched by `SessionMetaChanged` and applied via `setSessionMeta`. See [agent-host-sessions-providers](./agent-host-sessions-providers.md#surfacing-session-_metagit-to-workspacerepositories0) for how the agents-app changes view consumes it (PR [#312543](https://github.com/microsoft/vscode/pull/312543)).
 - **2026-04-16** — `6cd94ddc6f` — initial entry. Captures the AHP architecture as of `origin/main`: generic JSON-RPC + immutable state, URI-addressed root / session / terminal resources, action envelopes with server sequence numbers, optimistic session subscriptions, server-confirmed root/terminal subscriptions, capability-flag versioning. Drawn from the prior `agent-host-chat-sessions` skill.
 - **2026-04-16** — `6cd94ddc6f` — added concrete `IActionEnvelope` shape, subscription-class table, file-tree view of `state/`, and a generic-types/capabilities gotcha cross-referencing the new topology doc.
 - **2026-04-20** — `d05eca7455` — added a "Patterns and gotchas" entry and matching `## Debt & gotchas` entry covering the AHP authentication contract: `required: true` resources MUST throw `AHP_AUTH_REQUIRED`, not return empty results. Triggered by the renderer-side cache-bug investigation in `changes/2026-04-20-fix-initial-session-list-display/`.
