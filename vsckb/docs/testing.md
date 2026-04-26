@@ -112,7 +112,7 @@ Otherwise — single class or function, drive with events, assert on state?
 ## Workflow tips
 
 - **`unset ELECTRON_RUN_AS_NODE`** before `./scripts/test.sh` and `./scripts/test-integration.sh`. Otherwise the runner reuses the host process and fails opaquely.
-- **Always retranspile** after TS edits before running integration tests: `node build/next/index.ts transpile`. Unit tests via `./scripts/test.sh` retranspile internally.
+- **Always retranspile** after TS edits before running integration tests: `node build/next/index.ts transpile`. Unit tests via `./scripts/test.sh` retranspile internally; **but `node test/unit/node/index.js` does NOT — it runs the existing compiled `out/`**. After editing source, you must explicitly recompile (`npx tsc -p src --outDir out`) before invoking the unit runner directly, or you can silently get green tests against stale code that mask a real failure CI catches against fresh build. `npm run compile-check-ts-native` only type-checks, it doesn't emit.
 - **Type-check first**: `npm run compile-check-ts-native` is fast (≈3s) and catches a class of bugs before the runner even starts. Run it before any test command.
 - **Reproduce regression tests by reverting the fix.** When adding a regression test for a bug you just fixed, briefly revert the fix and confirm the test fails — it's the only way to be sure the test actually exercises the broken path. Restore the fix immediately after.
 - **Prefer behavioral tests over private-field probes.** If a class stores something on a private map, drive the events that fill the map and assert on observable behavior (state, dispatched actions, follow-up events) rather than reading the map. The cleanup test in `agentSideEffects.test.ts` does this for `_pendingSubagentEvents`.
@@ -133,6 +133,7 @@ Otherwise — single class or function, drive with events, assert on state?
 
 ## Changelog
 
+- **2026-04-25** — 89433a4490 — clarified the retranspile workflow tip: `node test/unit/node/index.js` runs the existing `out/` and does NOT retranspile, so editing source and rerunning the direct runner can give a stale-but-green result that CI then catches. Type-check (`compile-check-ts-native`) is not enough — must `npx tsc -p src --outDir out`. Caught the hard way when test snapshot updates passed locally and failed CI.
 - **2026-04-22** — `357bfe70c9` — added gotcha for real-SDK shell-command assertions: anchor the regex with `^` and tolerate quoted (`cd "<dir>"`) and unquoted forms plus both `&&` / `;` chain operators, since a substring `.includes("cd " + tempDir)` check both misses quoted variants AND mis-fires on later occurrences of `tempDir`. From the cd-prefix-strip real-SDK test (see [changes/2026-04-22-agent-host-cd-cleanup](../changes/2026-04-22-agent-host-cd-cleanup/summary.md)).
 
 - **2026-04-24** — `5407371c47` — reconciliation: no doc changes. New unit tests added since baseline (`agentConfigurationService.test.ts`, `agentHostSchema.test.ts`, `agentSessionSettingsFileSystemProvider.test.ts`, additional `remoteAgentHostProtocolClient` coverage) all fit cleanly into the existing four-layer model. The `c10232daea7` (real-SDK fixes) and `c08fa679e25` (per-key `setMetadata` sequencing) commits reinforce the existing gotchas about real-SDK drift and timing-sensitive tests; no prose change needed.

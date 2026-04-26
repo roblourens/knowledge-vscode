@@ -27,6 +27,8 @@ MCP support exists through plugin conversion (`toSdkMcpServers`), but the provid
 
 Provider logging is broad (`CopilotAgentSession._subscribeForLogging`), but it is not the same as the extension-host request logger and OTel bridge. For selfhosting investigations, the useful parity target is correlated turn/request/tool/hook/span diagnostics, not necessarily the same extension implementation.
 
+For the **`skill` tool**, Agent Host intentionally diverges from EH CLI parity. The EH CLI's `formatSkillInvocation` only sees the `skill` tool's args (`{ skill: <name> }`) and so renders "Invoking skill: <name>". Agent Host hides the raw `skill` tool and synthesizes a tool-call display from the SDK's `skill.invoked` lifecycle event, which carries `{ name, path, description, ... }` — the resulting "Reading skill [name]" link is clickable and (for `SKILL.md` basenames) is upgraded to a rich skill pill client-side. See [copilot-sdk-tool-display#skill-events](./copilot-sdk-tool-display.md#skill-events). This is the canonical "translate, don't copy" precedent: when the SDK gives Agent Host more than the EH CLI sees, Agent Host can render better than EH CLI parity would suggest.
+
 ## Debt & gotchas
 
 - **debt** (2026-04-21, copilotAgent.ts:_resolveSessionWorkingDirectory) — worktree isolation creates the branch/worktree but does not provide the extension-host CLI's turn-end auto-commit/checkpoint lifecycle. Add provider/protocol-side checkpoint or commit metadata before relying on Agent Host worktree sessions as shippable branches.
@@ -43,4 +45,5 @@ Provider logging is broad (`CopilotAgentSession._subscribeForLogging`), but it i
 
 ## Changelog
 
+- **2026-04-25** — 89433a4490 — added skill-display divergence note to "Parity gaps relevant to Agent Host": Agent Host hides the raw `skill` tool and synthesizes its display from `skill.invoked` (path-aware, clickable, rendered as a skill pill), where the EH CLI's `formatSkillInvocation` is stuck on name-only because it only sees the tool args. Canonical "translate, don't copy" example for future SDK divergences.
 - **2026-04-24** — 4b6403a3ab — split extension-host CLI reference and Agent Host parity gaps out of the Copilot provider overview
