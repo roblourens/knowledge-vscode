@@ -67,7 +67,7 @@ Each doc:
   - **`gotcha`** — something is the way it is on purpose; if you touch it, do Y. Presumed permanent.
   - **`debt`** — something looks wrong, could be cleaned up, or needs revisiting. Resolved when fixed.
   Each entry is one bullet line: `- **<kind>** (YYYY-MM-DD, <file:symbol>) — <description>`.
-- Ends with a **changelog section**: a reverse-chronological list of entries, each with a date, Git SHA, and short description of what changed in the component or in this doc's understanding of it.
+- Ends with a **changelog section**: a reverse-chronological list of entries, each with a date, Git SHA, and short description of what changed in the component or in this doc's understanding of it. Insert new entries as the first bullet, above same-day entries and older entries; if backfilling an older entry, place it in date-sorted position.
 
 **Cross-linking between docs:** Use plain Markdown links with relative paths (e.g., `[state sync protocol](./state-sync-protocol.md)`). Mention related docs inline where they're relevant rather than collecting them into a separate "See also" section. `index.md` is the only place that tries to be exhaustive about what exists.
 
@@ -153,7 +153,7 @@ This skill is deliberately lightweight. It's the normal agent coding workflow, a
 1. Verify the working tree has no other in-flight edits that don't belong to this session.
 2. `git fetch origin main` and `git pull --rebase --autostash origin main`. If the rebase fails (concurrent finalize touched the same docs), stop and surface the conflict.
 3. Run a retrospective on the session — what was misunderstood, what was a dead end, what should have been documented but wasn't — and map each finding to a `gotcha:`/`debt:` entry, doc body update, new doc, or `changes/` summary.
-4. Update affected files in `docs/`: revise descriptions, update cross-references, update `## Debt & gotchas`, append a changelog entry with today's date and the current HEAD SHA of the VS Code working branch.
+4. Update affected files in `docs/`: revise descriptions, update cross-references, update `## Debt & gotchas`, insert a changelog entry at the top with today's date and the current HEAD SHA of the VS Code working branch.
 5. Create new docs if needed; update `index.md` to list them.
 6. Remove the session's `plan/$SESSION_SLUG/` subfolder.
 7. Write `changes/$SESSION_SLUG/summary.md` (with the mandatory **What went wrong or was misunderstood** section).
@@ -173,7 +173,7 @@ This skill is deliberately lightweight. It's the normal agent coding workflow, a
 2. For each doc, read `Covers:` and the latest changelog entry to get a baseline SHA.
 3. Compute the set of VS Code commits between each doc's baseline SHA and `origin/main`.
 4. For docs with no overlap, bump the changelog SHA in place (no body changes) — the doc is presumed current. This is what makes the next reconcile cheap.
-5. For docs with overlap, drill in: read the changed code and commits, update the doc body, revisit `## Debt & gotchas`, append a changelog entry.
+5. For docs with overlap, drill in: read the changed code and commits, update the doc body, revisit `## Debt & gotchas`, insert a changelog entry at the top.
 6. Mechanical pass for any references to deleted/renamed/moved files or symbols, regardless of baseline.
 7. Commit and push the result directly to `main`.
 

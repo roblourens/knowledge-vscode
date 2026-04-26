@@ -75,13 +75,13 @@ For each existing doc in `$KNOWLEDGE_REPO/docs/` whose subject area was changed 
 - Update the `Covers:` line if the set of relevant paths changed.
 - Update inline cross-references if relationships between components changed.
 - Update the `## Debt & gotchas` section (see step 4a).
-- Append a changelog entry to the doc's changelog section:
+- Insert a changelog entry as the first bullet in the doc's changelog section:
 
   ```markdown
   - **YYYY-MM-DD** — <SHA> — <one-line description of what changed>
   ```
 
-  Use the current HEAD of `$VSCODE_BRANCH` for the SHA, abbreviated to 10 characters: `git -C "$VSCODE_REPO" rev-parse --short=10 HEAD`.
+  Use the current HEAD of `$VSCODE_BRANCH` for the SHA, abbreviated to 10 characters: `git -C "$VSCODE_REPO" rev-parse --short=10 HEAD`. Changelogs are newest-first; normal finalize entries go above same-day entries and older entries. If you are backfilling an older dated entry, place it in date-sorted position instead of putting it at the bottom.
 
 ### 4a. Update Debt & gotchas
 

@@ -66,7 +66,7 @@ For each doc that needs changes (from steps 3 or 4):
 - Update `Covers:` if the relevant paths shifted.
 - Update or remove inline references to deleted/renamed/moved symbols.
 - Revisit the `## Debt & gotchas` section (see step 5a).
-- Append a new changelog entry (see step 5b).
+- Insert a new changelog entry at the top of the changelog section (see step 5b).
 
 If a doc has been *substantially* invalidated (the component it describes has been split, merged, or deleted), do not silently rewrite it — surface it to the user and ask whether to rewrite, split, or delete the doc.
 
@@ -84,13 +84,15 @@ If the cross-cutting `## Active debt & gotchas` section in `index.md` references
 
 Bump the changelog baseline on every doc whose covered area saw any commits since its last baseline — **including docs where the change turned out not to invalidate any prose**. This is what makes the next reconcile cheap: the same range of commits won't be re-examined.
 
-For each such doc, append:
+For each such doc, insert this as the first changelog bullet:
 
 ```markdown
 - **YYYY-MM-DD** — <origin/main HEAD short SHA, via `git -C "$VSCODE_REPO" rev-parse --short=10 origin/main`> — reconciliation: <one-line summary of what changed in code and what (if anything) was updated in the doc>
 ```
 
 Use phrasing like "no doc changes — <commit description> didn't affect the architectural concepts this doc covers" for no-op reconciliations, so the changelog explains why the SHA was bumped without a body edit.
+
+Changelogs are newest-first. Reconcile normally writes a fresh baseline for `origin/main`, so the new entry belongs at the top, above same-day entries and older entries. If you are repairing or backfilling an older reconciliation entry, place it in date-sorted position instead of putting it at the bottom.
 
 Do **not** ask the user before bumping baselines for no-op reconciliations — it's the default behavior. The new SHA becomes the new baseline for next time.
 
