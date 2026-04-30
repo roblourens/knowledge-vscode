@@ -53,9 +53,22 @@ Copilot provider metadata is stored in the session database's `session_metadata`
 - `copilot.workingDirectory` - URI string for the session working directory.
 - `copilot.project.resolved` - marker that project resolution was attempted.
 - `copilot.project.uri` and `copilot.project.displayName` - cached project identity for list metadata.
-- `copilot.worktree.branchName` - set when isolation is `worktree`. Used by the restore path of the [session announcements](#session-announcements-worktree-creation) feature to reconstruct the "Created isolated worktree for branch X" message when a session is reopened.
+- `copilot.worktree.branchName`, `copilot.worktree.path`, `copilot.worktree.repositoryRoot` - set together when isolation is `worktree`. The branch name is used by the restore path of the [session announcements](#session-announcements-worktree-creation) feature to reconstruct the "Created isolated worktree for branch X" message when a session is reopened. All three together are required by the [archive lifecycle](#archive-lifecycle-worktree-cleanup) — without the path and repository root, the provider has no way to find the on-disk worktree from a cold process.
 
 Use `tryOpenDatabase()` for read-only checks that must not create session data. Use `openDatabase()` only on paths that intentionally create or update Agent Host-owned session data.
+
+## Archive lifecycle (worktree cleanup)
+
+When a worktree-isolated session is archived, `CopilotAgent.onArchivedChanged(session, true)` removes the on-disk worktree but leaves the git branch intact. Unarchiving (`onArchivedChanged(session, false)`) recreates the worktree from the preserved branch via `git worktree add`. The trigger is wired generically: `agentSideEffects.ts` `case ActionType.SessionIsArchivedChanged` calls the optional `IAgent.onArchivedChanged?(session, isArchived)` after persisting the archive flag, and any provider can opt in by implementing the hook.
+
+The whole body is sequenced through the existing `_sessionSequencer: SequencerByKey<string>` so it cannot race with `disposeSession` or in-flight turns. The implementation reads `copilot.worktree.{branchName,path,repositoryRoot}` via `tryOpenDatabase()`. Skip behavior:
+
+- **Archive skips** (worktree left on disk): metadata absent → no-op (see gotcha below); worktree directory already gone → drop the in-memory `_createdWorktrees` entry only; branch missing → log and bail (we wouldn't be able to recreate); uncommitted changes in the worktree → log `uncommitted-changes` and bail. The dirty-skip is the safety net in lieu of an auto-commit pass.
+- **Unarchive skips**: metadata absent → no-op; worktree already exists → no-op; branch missing → log and bail.
+
+The git helpers used here live on `IAgentHostGitService`: `branchExists`, `hasUncommittedChanges`, `addExistingWorktree`. The first two are also worth using anywhere else that needs the same checks; `addExistingWorktree` is `git worktree add <path> <branch>` (no `-b`), distinct from the existing `addWorktree` which creates a new branch.
+
+Auto-commit at end of turn is **out of scope** for this feature. EH CLI has a `handleRequestCompleted` hook that can auto-commit, but in practice it is off by default and we do not mirror it.
 
 ## Session announcements (worktree creation)
 
@@ -96,6 +109,8 @@ Run via `npm run test-node -- --grep <pattern>`. Do not use `scripts/test.sh` fo
 - **gotcha** (2026-04-20, copilotAgent.test.ts) - when renaming `CopilotAgent.id`, audit hardcoded literals in tests under `src/vs/platform/agentHost/test/node/`, including `protocol/toolApprovalRealSdk.integrationTest.ts`. `AgentSession.uri('copilot', ...)` constructions are not type-checked, and the real-SDK file is gated on `AGENT_HOST_REAL_SDK=1`, so stale provider ids can sit broken indefinitely.
 - **gotcha** (2026-04-21, updated 2026-04-22, package.json:@github/copilot) - the root `package.json` and `remote/package.json` versions of `@github/copilot` should track `extensions/copilot/package.json`. The Copilot extension ships with VS Code and is exercised by Copilot's own validation, so its pinned version is the known-good baseline. Bump in lockstep with it.
 - **gotcha** (2026-04-22, updated 2026-04-28, copilotAgent.ts:ICopilotModelInfo + IAgentModelInfo.maxContextWindow) - at `@github/copilot@1.0.34` and still at `1.0.38` the synthetic `auto` router model is returned by `listModels()` with `capabilities: {}`. `ICopilotModelInfo` intentionally wraps the SDK model shape with optional `capabilities`, `limits`, `supports`, and `max_context_window_tokens`; `_listModels` should `.map` and pass `auto` through with `maxContextWindow: undefined` rather than dropping it.
+- **gotcha** (2026-04-29, copilotAgent.ts:_readWorktreeMetadata) - if `copilot.worktree.path` or `copilot.worktree.repositoryRoot` is missing (sessions created before those keys were persisted), both `_cleanupWorktreeOnArchive` and `_recreateWorktreeOnUnarchive` early-return and leave the worktree on disk untouched. Do not "fix" this by deriving the worktree path from `copilot.workingDirectory` and reversing the `<repoBasename>.worktrees/<wt>` convention to recover the repository root: the derivation works for the common case, but if the user has a non-standard repo layout the inverse can produce a wrong path and we would delete a worktree we cannot recreate. Skipping is the safer default — the worktree stays on disk and the user is no worse off than before the feature existed.
+- **gotcha** (2026-04-29, copilotAgent.ts:onArchivedChanged) - the archive cleanup path **skips on uncommitted changes** (`hasUncommittedChanges(worktreePath)` true → log and bail). This is intentional: there is no auto-commit pass before cleanup, so silently destroying user work would be a regression. EH CLI has the same protection. Do not remove this guard without first wiring an auto-commit/checkpoint flow.
 - **gotcha** (2026-04-21, copilotAgent.ts:_refreshModels) - the `try { await _listModels() } catch { _models = [] }` block silently swallows every error, not just `AHP_AUTH_REQUIRED`. SDK schema mismatches, network errors, or throws inside `_listModels` all produce an empty model list in the UI. The real-SDK `listModels returns well-shaped model entries after authenticate` integration test is the safety net.
 
 ## Related
@@ -110,6 +125,7 @@ Run via `npm run test-node -- --grep <pattern>`. Do not use `scripts/test.sh` fo
 
 ## Changelog
 
+- **2026-04-29** - 2c0d520761 - added Archive lifecycle section: `IAgent.onArchivedChanged?` hook, `CopilotAgent` archive/unarchive worktree cleanup via new `branchExists`/`hasUncommittedChanges`/`addExistingWorktree` helpers on `IAgentHostGitService`, sequenced through `_sessionSequencer`, with skip-on-dirty / skip-on-missing-branch / skip-on-missing-metadata guards. Added `copilot.worktree.path` and `copilot.worktree.repositoryRoot` metadata keys. Added two gotchas (don't derive missing metadata; keep the dirty-skip guard). PR [#313393](https://github.com/microsoft/vscode/pull/313393).
 - **2026-04-28** - 5e0eb8ff17 - bumped `@github/copilot` from `^1.0.34` to `^1.0.38` (root + `remote/`) to track the version pinned in `extensions/copilot/package.json`. No consumer-side changes: the `ICopilotModelInfo` wrapper still absorbs the synthetic `auto` model shape and the real-SDK `listModels` test passes unchanged. `@github/copilot-sdk` stays at `^0.2.2`.
 - **2026-04-24** - 4b6403a3ab - split extension-host CLI parity, permissions, shell tools, and tool display details into focused docs; trimmed this doc back to provider lifecycle, ownership, authentication, metadata, announcements, and provider-level tests.
 - **2026-04-22** - d6e5c5227d - bumped `@github/copilot` from `^1.0.28` to `^1.0.34`; added `ICopilotModelInfo` wrapper interface with optional `capabilities`/`limits`/`supports`/`max_context_window_tokens`, made `IAgentModelInfo.maxContextWindow` optional, and switched `_listModels` to `.map` so the synthetic `auto` model surfaces with `maxContextWindow: undefined` instead of throwing or being dropped.
