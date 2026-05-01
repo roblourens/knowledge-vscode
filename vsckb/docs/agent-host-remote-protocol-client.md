@@ -18,6 +18,12 @@ Outgoing JSON-RPC requests are correlated by numeric id in `_pendingRequests`. T
 
 `RemoteAgentHostProtocolError` preserves JSON-RPC `code`, `message`, and optional `data`. Prefer checking `code` over matching strings. The local synthetic close/dispose code is currently `-32000` because these failures happen client-side before a server-defined AHP error exists.
 
+## Session creation URI ownership
+
+`createSession(config?)` must preserve a client-provided `config.session`. The VS Code side now chooses the AHP session URI before asking a remote Agent Host to create the session: the chat/session resource already contains the raw id, and `AgentHostSessionHandler` passes `session: AgentSession.uri(provider, rawId)` through `IAgentConnection.createSession(...)`. The remote protocol client should generate `AgentSession.uri(provider, generateUuid())` only when `config.session` is absent.
+
+This keeps local and remote creation consistent: the client determines the chat session URI over AHP, and the server/remote path honors it. If the remote client ignores `config.session` and generates a different URI, the handler's mismatch check will fail; that is a contract violation, not an id-remapping case.
+
 ## Extension request path
 
 Most requests use the generated protocol `ICommandMap`. VS Code also has a small extension method, `shutdown`, that is not part of the public AHP command map. Keep those methods on a separate typed extension-command map in this client; do not cast request objects as response shapes. If an extension method becomes part of AHP proper, move it to the protocol repo first and regenerate VS Code's `state/protocol/` mirror.
@@ -55,11 +61,13 @@ The 2026-04-21 audit intentionally fixed only request lifecycle and structured e
 
 ## Debt & gotchas
 
+- **gotcha** (2026-04-30, remoteAgentHostProtocolClient.ts:createSession) - preserve `config.session` when present. The client owns the AHP URI for non-fork session creation; generate a URI only as a fallback for callers that did not request one.
 - **debt** (2026-04-21, remoteAgentHostProtocolClient.ts:connect) - remote reconnect still behaves like a fresh `initialize`; it does not use AHP replay/snapshot reconnect semantics with stable subscriptions and `lastSeenServerSeq`.
 - **debt** (2026-04-21, webSocketClientTransport.ts:onClose) - WebSocket/SSH/tunnel relay close semantics are still not covered by a shared transport test matrix; add once-gated close, malformed-frame, send-after-close, and dispose-trigger tests before refactoring transport behavior.
 - **gotcha** (2026-04-21, remoteAgentHostProtocolClient.ts:dispose) - disposal must call `_handleClose(disposed)` before `super.dispose()` so `_onDidClose` is still live for `_raceClose()` listeners, and so intentional client disposal wins over transports that emit `onClose` during disposal.
 
 ## Changelog
 
+- **2026-04-30** - `928bc0340d` - documented that remote `createSession(config.session)` must honor the client-chosen AHP URI and only generate a new URI when no session was requested.
 - **2026-04-24** — `5407371c47` — reconciliation: no doc changes. Type-prefix renames from `0b4570038fe` (`Adopt renamed agent host protocol types`) only affect import names, not the architectural prose. `dcc7279e0d7` (web connection stability + terminal reconnection), `1f9cd94d0da` (SSH tunnel teardown), `037d32ab6b9` (protocol cleanups), and `2289e091159` (host-level settings) live below the architectural concepts this doc describes; the open reconnect/replay and transport close-semantics debt is unchanged.
 - **2026-04-21** - `b1564bc1e1` - initial entry after the remote protocol client lifecycle cleanup and Copilot review follow-up.

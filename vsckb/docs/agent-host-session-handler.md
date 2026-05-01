@@ -1,6 +1,6 @@
 # Agent Host Session Handler
 
-_Covers: src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostSessionHandler.ts_
+_Covers: src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostSessionHandler.ts, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostSessionListController.ts, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostChatContribution.ts, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostSessionWorkingDirectoryResolver.ts_
 
 `AgentHostSessionHandler` is the **shared** adapter between AHP session state (see [agent-host-protocol](./agent-host-protocol.md)) and VS Code chat sessions. The same handler runs in all three deployment configurations — VS Code with a local agent host, the Agents app with a local agent host, and the Agents app with one or more remote agent hosts. For the topology and what `connectionAuthority` / `sessionType` mean, see [agent-host-topology](./agent-host-topology.md).
 
@@ -8,7 +8,7 @@ _Covers: src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHost
 
 For each chat session backed by an Agent Host, the handler:
 
-- **Creates and subscribes** to the backend session (via `IAgentConnection`), translating the workbench-side session id ↔ canonical AHP session URI (`copilot:/<rawId>` etc.). Session creation now passes the active client atomically (`createSession({ …, activeClient })`) instead of dispatching a separate `ActiveClientChanged` after the session is created.
+- **Creates and subscribes** to the backend session (via `IAgentConnection`). The chat resource's raw path is already the backend raw session id; the handler derives the canonical AHP session URI (`AgentSession.uri(provider, rawId)`, e.g. `copilot:/<rawId>`) and passes it as `createSession({ session, …, activeClient })`. Session creation now passes the active client atomically instead of dispatching a separate `ActiveClientChanged` after the session is created.
 - **Converts chat requests into `session/turnStarted`** dispatches.
 - **Renders state into chat history and progress** by adapting `ISessionState` updates into chat content parts and progress messages.
 - **Handles active-turn reconnection** — if the workbench reattaches mid-turn (after reload, host change, or network blip), the handler resumes rendering from the protocol's replay/snapshot.
@@ -26,7 +26,7 @@ For each chat session backed by an Agent Host, the handler:
 
 - Choosing models — that's `AgentHostLanguageModelProvider` (`agentHostLanguageModelProvider.ts`).
 - Discovering agents and registering chat session contributions — that's `AgentHostContribution` (`agentHostChatContribution.ts`), which listens to local `rootState.agents` and dynamically registers one chat session type per advertised agent (`agent-host-${agent.provider}`).
-- Listing sessions in the workbench chat list — that's `AgentHostSessionListController` (`agentHostSessionListController.ts`). It fetches sessions via `connection.listSessions()` on the first `refresh()`, caches the result in `_items`, and skips the RPC on subsequent `refresh()` calls. The in-memory cache is kept current by `notify/sessionAdded`, `notify/sessionRemoved`, and `notify/sessionSummaryChanged` notifications. The cache is invalidated (a) implicitly, when the agent registration is torn down and a new controller is created; (b) explicitly, via `resetCache()` called from `AgentHostContribution.onAgentHostStart`, which fires when the agent host process restarts without changing the registration. AHP notifications are not replayed on reconnect, so the explicit path is required.
+- Listing sessions in the workbench chat list — that's `AgentHostSessionListController` (`agentHostSessionListController.ts`). It fetches sessions via `connection.listSessions()` on the first `refresh()`, caches the result in `_items`, and skips the RPC on subsequent `refresh()` calls. The in-memory cache is kept current by `notify/sessionAdded`, `notify/sessionRemoved`, and `notify/sessionSummaryChanged` notifications. The cache is invalidated (a) implicitly, when the agent registration is torn down and a new controller is created; (b) explicitly, via `resetCache()` called from `AgentHostContribution.onAgentHostStart`, which fires when the agent host process restarts without changing the registration. AHP notifications are not replayed on reconnect, so the explicit path is required. The controller also implements `newChatSessionItem` for local agent-host chat-session startup; see [Chat-session URI ownership](#chat-session-uri-ownership).
 - Showing sessions in the Sessions app — that's the `*AgentHostSessionsProvider` family under `src/vs/sessions/contrib/`; see [agent-host-sessions-providers](./agent-host-sessions-providers.md).
 
 ## Local vs. remote
@@ -48,6 +48,24 @@ interface IAgentHostSessionHandlerConfig {
 Local wiring is in `agentHostChatContribution.ts` (`AgentHostContribution`); remote wiring is in `src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHost.contribution.ts` (`RemoteAgentHostContribution`). They differ only in how `sessionType`, `connectionAuthority`, and `connection` are derived.
 
 Lifecycle controls that are local-only (restart, dev-mode startup) live on `IAgentHostService`, not on the handler. If the handler reaches for `IAgentHostService` instead of `IAgentConnection` for a behavior that should also work remotely, that's a bug.
+
+## Chat-session URI ownership
+
+Agent Host chat sessions should not expose `/untitled-*` resources past the generic chat-service staging layer. The raw id in an Agent Host chat resource is the raw backend session id from the moment the resource is handed to `AgentHostSessionHandler`.
+
+There are two creation paths, both client-owned:
+
+- **Sessions app / provider-created drafts.** `BaseAgentHostSessionsProvider.createNewSession(...)` creates an `ISession.resource` with the host-specific chat resource scheme (`agent-host-${provider}` locally, `remote-${authority}-${provider}` remotely) and a final-looking random path (`/${uuid}`). It also records that the resource is still a local draft (`SessionStatus.Untitled`) until the first turn creates the backend session and the backend list reports it.
+- **Workbench contributed-chat blank widget.** The chat layer may temporarily create an internal `/untitled-*` resource for a blank contributed chat widget. On first send, `ChatServiceImpl.sendRequest` calls `IChatSessionsService.createNewChatSessionItem(...)` before invoking the agent. For local Agent Host, `AgentHostSessionListController.newChatSessionItem(...)` returns a real final-looking `agent-host-${provider}:/${uuid}` item and marks the raw id as pending-new. The handler is then loaded for that real resource, not for the `/untitled-*` staging URI.
+
+`AgentHostSessionHandler` therefore rejects `agent-host-*:/untitled-*` resources. If one reaches the handler, it means the startup path skipped `newChatSessionItem` or a caller invented a resource outside the Agent Host owner boundary.
+
+For final-looking resources, the handler distinguishes "new draft" from "existing backend session" via explicit ownership predicates, not by path shape:
+
+- Local workbench chat: `AgentHostContribution` wires `AgentHostSessionListController.isNewSession(resource)` into the handler config. That predicate is true only for ids returned by `newChatSessionItem` and is cleared when `notify/sessionAdded`, `notify/sessionRemoved`, or a later `refresh()` observes the real backend session.
+- Sessions app providers: `IAgentHostSessionWorkingDirectoryResolver.registerResolver(...)` accepts an `isNewSession` predicate. Local and remote provider contributions register that predicate against the **chat resource scheme** (not the logical provider id) and return true while `getSessionByResource(resource)?.status` is `SessionStatus.Untitled`.
+
+When the first request arrives for a draft, `_createAndSubscribe` derives `requestedSession = AgentSession.uri(config.provider, rawId)` from the chat resource and passes it to `connection.createSession({ session: requestedSession, ... })`. The server/remote connection must return the same URI; a mismatch is a contract error. Forks are the exception: fork creation lets the backend choose the new fork URI because the fork source/turn is the defining input.
 
 ## Editing through the handler vs. directly
 
@@ -127,6 +145,9 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 
 ## Debt & gotchas
 
+- **gotcha** (2026-04-30, agentHostSessionHandler.ts:provideChatSessionContent + AgentHostSessionListController.newChatSessionItem) — Agent Host chat resources reaching the handler must be final-looking resources created by the Agent Host owner path. `/untitled-*` is only an internal contributed-chat staging URI; first send must call `IChatSessionsService.createNewChatSessionItem`, which lets `AgentHostSessionListController.newChatSessionItem` choose the real URI. If `agent-host-*:/untitled-*` reaches the handler, treat it as a bug, not as a valid draft.
+- **gotcha** (2026-04-30, agentHostSessionHandler.ts:_createAndSubscribe) — the VS Code client chooses the AHP session URI for non-fork Agent Host session creation. `_createAndSubscribe` must pass `session: AgentSession.uri(provider, rawId)` and fail if the connection returns a different URI. Do not reintroduce a UI-resource-to-backend-resource map or let the backend silently generate a different id for the same chat resource.
+
 - **debt** (2026-04-21, agentHostSessionHandler.ts:_convertVariablesToAttachments) — selection attachments currently send only path/display name even though `IAgentAttachment` supports `text` and `selection`, and the Copilot provider forwards them to the SDK. Populate selected text/range before treating selection parity as complete.
 - **debt** (2026-04-21, agentHostSessionHandler.ts:_convertVariablesToAttachments) — request context parity is much thinner than the extension-host Copilot CLI prompt resolver: diagnostics, image/binary attachments, PR/merge references, ignored-file filtering, notebook exclusions, and worktree path translation need AHP-native equivalents.
 - **debt** (2026-04-21, agentHostSessionHandler.ts:_dispatchActiveClient) — client tools are generic and allowlist-driven, but Agent Host does not yet provide a curated default set equivalent to the extension-host CLI's `get_selection`, `get_diagnostics`, `get_vscode_info`, `open_diff`, `close_diff`, and `update_session_name` tools.
@@ -141,6 +162,7 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 
 ## Changelog
 
+- **2026-04-30** — `928bc0340d` — documented Agent Host chat-session URI ownership: `/untitled-*` is only an internal contributed-chat staging resource, `AgentHostSessionListController.newChatSessionItem` creates the final local URI before first send, provider-created drafts already use final-looking resources, and `AgentHostSessionHandler` derives and requests the canonical AHP URI directly from the chat resource.
 - **2026-04-25** — `89433a4490` — documented the SKILL.md client-side exception to the empty-link-text rewrite in "Remote file links in tool messages": `rewriteLinkTokenRaw` detects `SKILL.md` via `isSkillFileUri`, tags the URI with `?vscodeLinkType=skill`, and preserves the link label (the skill name) so the chat inline anchor widget renders a rich skill pill. Detection lives client-side so no VS Code-specific link metadata leaks into AHP.
 - **2026-04-25** — `99e59eeecd` — documented `AgentHostSessionListController` caching: first `listSessions()` primes the cache; subsequent `refresh()` calls serve from `_items`; `onAgentHostStart` in `AgentHostContribution` calls `resetCache()` to handle agent host restart without registration teardown (AHP notifications not replayed on reconnect). Added gotcha for both invalidation paths.
 - **2026-04-24** — `5407371c47` — reconciliation: noted server-provided `ConfirmationOption[]` rendering on tool-call confirmations (commit `779b23b6196`), the eager `activeClient` parameter on `createSession` replacing the post-create `ActiveClientChanged` round-trip (`886c556841c`), and the `presentation: Hidden` flag on file-edit tool invocations to avoid duplicate edit pills (`e85baae4d67`). PostToolUse hook fix (`59be36b6d53`) and deferred repo-hook loading (`dd1eb813ec4`) are server/sessions-provider-side and don't change the handler's prose.
