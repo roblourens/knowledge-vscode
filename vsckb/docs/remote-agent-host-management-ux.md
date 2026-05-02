@@ -1,6 +1,6 @@
 # Remote Agent Host Management UX
 
-_Covers: src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHostActions.ts, src/vs/sessions/contrib/remoteAgentHost/browser/manageRemoteAgentHosts.ts, src/vs/sessions/contrib/remoteAgentHost/browser/remoteHostOptions.ts, src/vs/platform/agentHost/common/sshRemoteAgentHost.ts, src/vs/platform/agentHost/node/sshRemoteAgentHostService.ts_
+_Covers: src/vs/sessions/contrib/chat/browser/sessionWorkspacePicker.ts, src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHostActions.ts, src/vs/sessions/contrib/remoteAgentHost/browser/manageRemoteAgentHosts.ts, src/vs/sessions/contrib/remoteAgentHost/browser/remoteHostOptions.ts, src/vs/platform/actionWidget/browser/actionList.ts, src/vs/platform/agentHost/common/sshRemoteAgentHost.ts, src/vs/platform/agentHost/node/sshRemoteAgentHostService.ts_
 
 The remote agent host management UX lives in `src/vs/sessions/contrib/remoteAgentHost/browser/` and provides three surfaces: an SSH connection picker, a tunnel connection picker, a per-remote options popup, and a standalone "Manage Remote Agent Hosts" F1 command. All surfaces use QuickPick from `IQuickInputService`.
 
@@ -33,13 +33,19 @@ Shows dev tunnels from `ITunnelAgentHostService.listTunnels()`. The picker opens
 
 `showRemoteHostOptions` in `remoteHostOptions.ts` shows a QuickPick with per-remote actions for a connected `IAgentHostSessionsProvider`:
 
-- **Reconnect** — calls `setConnection` / re-initiates the provider connection.
-- **Remove** — calls `remoteAgentHostService.removeRemoteAgentHost(address)`.
+- **Reconnect** — calls the shared `reconnectRemoteHost(...)` helper. That prefers `provider.connect()` when the provider owns its transport (tunnels), and falls back to `remoteAgentHostService.reconnect(address)` for generic remote providers.
+- **Remove** — calls the shared `removeRemoteHost(...)` helper. That prefers `provider.disconnect()` when the provider owns its transport (tunnels), and falls back to `remoteAgentHostService.removeRemoteAgentHost(address)` for generic remote providers.
 - **Copy connection string** — copies `remoteAddress` to clipboard.
 - **Open settings** — opens remote-specific settings.
 - **Show output** — opens the provider's output channel.
 
 Accepts `IShowRemoteHostOptionsOptions.showBackButton` and returns `'back' | undefined`.
+
+## Session workspace picker inline remove
+
+The session workspace picker (`sessionWorkspacePicker.ts`) shows remote host rows in the Remote tab. Rows with `onRemove` get the shared ActionList close button (`$(close)`) rendered by `actionList.ts`.
+
+Inline remove must use the same `removeRemoteHost(...)` helper as the per-remote options picker. Calling `IRemoteAgentHostService.removeRemoteAgentHost(address)` directly bypasses tunnel-owned disconnect state (including persisted auto-connect suppression), so the X button and "Remove Remote" diverge. The shared ActionList `onRemove` callback is async-aware; await the provider removal before removing the row locally so failures and provider refresh ordering don't get hidden by the UI.
 
 ## Manage Remote Agent Hosts (`manageRemoteAgentHosts.ts`)
 
@@ -84,6 +90,7 @@ The one **legitimate exception** is transitioning from `actionWidgetService.hide
 
 ## Debt & gotchas
 
+- **gotcha** (2026-05-02, sessionWorkspacePicker.ts:onRemove + remoteHostOptions.ts:removeRemoteHost) — the workspace-picker X and "Remove Remote" must call the same helper. Do NOT call `IRemoteAgentHostService.removeRemoteAgentHost` directly from the X; tunnel providers need their `provider.disconnect()` hook to persist the user's disconnect intent and suppress future auto-connect.
 - **gotcha** (2026-04-26, remoteAgentHostActions.ts:promptToConnectViaSSH) — there is no "Enter manually" static entry; the dynamic new-host item is synthesized from the current input. Do NOT re-add a static placeholder. The pattern mirrors Remote SSH extension behavior deliberately.
 - **gotcha** (2026-04-26, remoteAgentHostActions.ts:onDidAccept) — call `picker.hide()` inside `onDidAccept`, not `picker.dispose()`. `dispose()` inside `onDidAccept` triggers `onDidHide` twice-ish and causes double-resolve or double-dispose. The `DisposableStore` pattern in `onDidHide` handles all cleanup.
 - **gotcha** (2026-04-26, manageRemoteAgentHosts.ts:buildItems) — the "Remote Agent Hosts" separator header shows items regardless of `connectionStatus` — including Offline/Connecting. Do NOT rename it to "Connected" without also filtering to `connectionStatus === 'Connected'`.
@@ -91,4 +98,5 @@ The one **legitimate exception** is transitioning from `actionWidgetService.hide
 
 ## Changelog
 
+- **2026-05-02** — `b61ea2452e` — documented the shared remote-host remove/reconnect helpers, workspace-picker inline X semantics, and the async ActionList remove path needed for tunnel-backed providers.
 - **2026-04-26** — `eb9ae3f827` — initial entry: SSH picker UX (dynamic new-host item, footer items, no "Enter manually"), Configure SSH Hosts file picker, tunnel picker, per-remote options, standalone manage picker, back-button threading, DisposableStore pattern, `ensureUserSSHConfig` throw-on-error contract.

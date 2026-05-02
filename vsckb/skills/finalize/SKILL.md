@@ -29,6 +29,8 @@ Re-derive `VSCODE_REPO` and `VSCODE_BRANCH` from `git rev-parse` against the wor
 
 Check `git -C "$KNOWLEDGE_REPO" status --porcelain`. If there are uncommitted edits that don't belong to this session (e.g. another in-flight finalize, hand edits the user is working on), stop and surface them — do not commit them along with this session's work.
 
+Exception: unrelated uncommitted `plan/<other-session>/` folders are common when another session is in progress. If the user confirms they are unrelated, you may ignore those folders and continue, but you must avoid `git add -A`; stage only this session's doc/change/plan cleanup files explicitly.
+
 ### 2. Sync with origin
 
 ```sh
@@ -178,6 +180,8 @@ git -C "$KNOWLEDGE_REPO" add -A
 git -C "$KNOWLEDGE_REPO" commit -m "$SUBJECT"
 git -C "$KNOWLEDGE_REPO" push origin main
 ```
+
+If step 1 identified unrelated plan folders that the user asked you to ignore, do not use `git add -A` here. Stage the specific files for this finalize (updated docs, `changes/$SESSION_SLUG/summary.md`, deleted `plan/$SESSION_SLUG/`, and any intentional skill updates) and verify `git diff --cached --name-status` does not include the unrelated plan folders before committing.
 
 If the push is rejected (someone else pushed between steps 2 and 8), re-run step 2's `pull --rebase` and retry the push once. If it still fails, stop and surface to the user.
 

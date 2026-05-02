@@ -1,6 +1,6 @@
 # Agent Host Sessions Providers
 
-_Covers: src/vs/sessions/contrib/agentHost/browser/baseAgentHostSessionsProvider.ts, src/vs/sessions/contrib/agentHost/browser/localAgentHostSessionsProvider.ts, src/vs/sessions/contrib/agentHost/browser/localAgentHost.contribution.ts, src/vs/sessions/contrib/agentHost/browser/agentHostSettings.contribution.ts, src/vs/sessions/contrib/agentHost/browser/agentSessionSettings.contribution.ts, src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHostSessionsProvider.ts, src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHost.contribution.ts, src/vs/sessions/common/agentHostSessionsProvider.ts_
+_Covers: src/vs/platform/agentHost/common/tunnelAgentHost.ts, src/vs/sessions/contrib/agentHost/browser/baseAgentHostSessionsProvider.ts, src/vs/sessions/contrib/agentHost/browser/localAgentHostSessionsProvider.ts, src/vs/sessions/contrib/agentHost/browser/localAgentHost.contribution.ts, src/vs/sessions/contrib/agentHost/browser/agentHostSettings.contribution.ts, src/vs/sessions/contrib/agentHost/browser/agentSessionSettings.contribution.ts, src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHostSessionsProvider.ts, src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHost.contribution.ts, src/vs/sessions/contrib/remoteAgentHost/browser/tunnelAgentHost.contribution.ts, src/vs/sessions/contrib/remoteAgentHost/browser/webTunnelAgentHostService.ts, src/vs/sessions/contrib/remoteAgentHost/electron-browser/tunnelAgentHostServiceImpl.ts, src/vs/sessions/common/agentHostSessionsProvider.ts_
 
 `LocalAgentHostSessionsProvider` and `RemoteAgentHostSessionsProvider` are the Sessions app's view of Agent Host sessions. Both extend a shared abstract base, `BaseAgentHostSessionsProvider`, that owns ~all of the structural behaviour: the session cache, the three config caches, the lazy `ISessionState.config` subscription seeding, AHP notification/action handlers, `sendAndCreateChat`, and a single concrete `AgentHostSessionAdapter` (`ISession` implementation). The subclasses contribute only the bits that genuinely differ: which connection to use, how to label sessions, how to map session types ↔ resource schemes, how to pick a working folder, and (remote only) connection lifecycle. Both implement `IAgentHostSessionsProvider` (defined in `src/vs/sessions/common/agentHostSessionsProvider.ts`), which extends `ISessionsProvider` with the Agent Host extras the Sessions UI needs: dynamic session config, optional remote connection status, and an output channel id. The local provider talks to `IAgentHostService` (utility-process MessagePort); the remote provider talks to an `IRemoteAgentHostConnection` over WebSocket / SSH / tunnel relay.
 
@@ -189,6 +189,20 @@ The well-known shape lives in `src/vs/platform/agentHost/common/state/sessionSta
 
 The Sessions app changes view consumes the resulting fields via `workspace.repositories[0]` in `changesViewModel.ts`. Note that the **agents-app main-window session list** (`agentSessionsService.getSession(uri).metadata`, populated by `AgentHostSessionListController._buildMetadata`) does NOT currently carry these git fields — only `remoteAgentHost` and `workingDirectoryPath`. See the corresponding debt entry below.
 
+## Tunnel-backed remote providers
+
+Tunnel-backed remotes are surfaced by `TunnelAgentHostContribution`, not by the generic `RemoteAgentHostContribution`. The tunnel service owns the cached tunnel list and the persisted auto-connect suppression list:
+
+- `getCachedTunnels()` is the recently used / discoverable tunnel cache.
+- `suppressAutoConnect(tunnelId)` records that the user explicitly disconnected a tunnel.
+- `clearAutoConnectSuppression(tunnelId)` clears that intent when the user explicitly reconnects or picks the tunnel again.
+
+The contribution filters suppressed tunnels out of provider reconciliation. A user-disconnected tunnel should not register a `RemoteAgentHostSessionsProvider`, should not appear in the session workspace picker's Remote tab as "Connecting" or "Offline", and should not participate in wake/status-check auto-reconnect loops. The tunnel picker can still discover the tunnel and `cacheTunnel(...)` clears suppression after the user explicitly chooses it.
+
+Background auto-connect has two suppression checks: one before starting, and one immediately after `await tunnelService.connect(...)`. The second check is load-bearing because the user can click the X while a startup/background connect is already in flight; if suppression appears during that await, the background connection must be disconnected again and must not clear the user's intent.
+
+User-initiated reconnect clears suppression at the start of the attempt, not only after success. If the explicit attempt fails transiently, the normal retry loop should be allowed to continue instead of being blocked by the previous disconnect marker.
+
 
 
 - [agent-host-topology](./agent-host-topology.md) — how the Sessions app relates to the workbench app.
@@ -198,6 +212,9 @@ The Sessions app changes view consumes the resulting fields via `workspace.repos
 
 ## Debt & gotchas
 
+- **gotcha** (2026-05-02, tunnelAgentHost.contribution.ts:_reconcileProviders + _connectTunnel) — suppressed tunnels are still in the tunnel cache, but must be filtered out of provider reconciliation and reconnect bookkeeping. Do not register a provider and mark it "Connecting" for a user-disconnected tunnel; it should be invisible in the workspace picker until the user chooses it again from the tunnel picker.
+- **gotcha** (2026-05-02, tunnelAgentHost.contribution.ts:_connectTunnel) — keep both suppression checks around background connects: pre-check skips already-suppressed tunnels; post-`await connect` check handles the race where the user disconnects while a background connect is in flight.
+- **gotcha** (2026-05-02, tunnelAgentHost.contribution.ts:_connectTunnel) — clear tunnel auto-connect suppression at the start of a user-initiated connect attempt, not only after success. Otherwise a failed explicit reconnect leaves later retry timers blocked by the old suppression marker.
 - **gotcha** (2026-04-30, baseAgentHostSessionsProvider.ts:_createNewSessionForType + AgentHostSessionListController.newChatSessionItem) — Agent Host-owned new sessions use final-looking resources from creation time (`/<uuid>` under the host-specific resource scheme). Do not create Agent Host `ISession.resource` values with `/untitled-*`; that path shape belongs only to the generic chat service's temporary blank contributed-chat resource and must be converted before the Agent Host handler/provider owns it.
 - **gotcha** (2026-04-30, agentHostSessionListController.ts:newChatSessionItem) — `newChatSessionItem` returns a routing handle, not a visible list row. Do not insert the item into `_items` before the backend confirms session creation; otherwise a failed `createSession` leaves a phantom row. Track pending ids separately and clear them from `notify/sessionAdded`, `notify/sessionRemoved`, and `refresh()`.
 - **gotcha** (2026-04-30, sessionsManagementService.ts:onDidReplaceSession) — a draft-to-committed transition with the same `sessionId` is a change, not a removal. Same-id replacement events must not emit `removed: [from]`; consumers such as terminal cleanup treat removals as ownership loss.
@@ -220,6 +237,7 @@ The Sessions app changes view consumes the resulting fields via `workspace.repos
 
 ## Changelog
 
+- **2026-05-02** — `b61ea2452e` — documented tunnel-backed remote provider lifecycle: cached tunnels vs user-disconnect suppression, provider filtering for suppressed tunnels, background-connect race checks, and user-initiated suppression clearing.
 - **2026-04-30** — `928bc0340d` — documented the real Agent Host session URI lifecycle: Sessions app providers and the local workbench `AgentHostSessionListController.newChatSessionItem` create final-looking resources, draft state is explicit (`SessionStatus.Untitled` / pending-new predicates), the handler asks AHP to create the exact client-chosen URI, and same-id draft→committed replacement must not be treated as removal.
 - **2026-04-29** — `fa1adf3685` — added gotcha for `readBranchProtectionPatterns` worktree resource: must use `workingDirectory ?? project.uri` not just `project.uri`. PR [#313277](https://github.com/microsoft/vscode/pull/313277).
 - **2026-04-26** — `b86149ad81` — added debt for the `META_DIFF_BASE_BRANCH` silent-fallback in `_computeGitDrivenDiffs`.
