@@ -47,6 +47,7 @@ For the **`skill` tool**, Agent Host intentionally diverges from EH CLI parity. 
 
 ## Changelog
 
+- **2026-05-01** — b2e6267136 — reconciliation: no body changes. The CLI logging/model/remote/runtime-pty commits (`675ef9f09b96`, `53964c4e856f`, `32db9092a586`, `17c5c32122f7`) are implementation parity details, while the Agent Host Copilot restore/shell changes are covered in the provider and shells docs.
 - **2026-04-29** — 2c0d520761 — noted that archive/unarchive worktree cleanup is now mirrored (see [copilot-agent-provider § Archive lifecycle](./copilot-agent-provider.md#archive-lifecycle-worktree-cleanup)); narrowed the worktree-lifecycle debt entry to just the auto-commit/checkpoint half. PR [#313393](https://github.com/microsoft/vscode/pull/313393).
 - **2026-04-26** — `b86149ad81` — updated "Parity gaps" to note that Agent Host now produces git-driven per-session file diffs for the "Branch changes" view (PR [#312632](https://github.com/microsoft/vscode/pull/312632)); clarified this is not the same as auto-commit/checkpoint — changes remain as working-tree files.
 - **2026-04-25** — 89433a4490 — added skill-display divergence note to "Parity gaps relevant to Agent Host": Agent Host hides the raw `skill` tool and synthesizes its display from `skill.invoked` (path-aware, clickable, rendered as a skill pill), where the EH CLI's `formatSkillInvocation` is stuck on name-only because it only sees the tool args. Canonical "translate, don't copy" example for future SDK divergences.

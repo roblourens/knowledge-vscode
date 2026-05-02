@@ -8,7 +8,7 @@ There are two implementations, one per app:
 
 | Concern | Local AH (`LocalAgentHostCustomizationItemProvider`) | Remote AH (`RemoteAgentCustomizationItemProvider`) |
 |---|---|---|
-| File source | Local `IPromptsService` index (workspace + user + extensions) **+ built-in skills from `BUILTIN_STORAGE`** | Walks `agent-host://` URIs through `IFileService` per plugin folder |
+| File source | Local `IPromptsService` index (workspace + user + extensions) **+ built-in skills from `BUILTIN_STORAGE`** | Host-configured plugins from root config + session-synced plugins, walked as `agent-host://` URIs through `IFileService` per plugin folder |
 | Skill metadata | `IPromptsService.findAgentSkills(token)` (already parses + sanitizes + truncates frontmatter) | `IFileService.readFile(SKILL.md)` + `new PromptFileParser().parse(...)` on demand |
 | Item shape | Flat list of files | Parent plugin item + expanded children, with `groupKey` for host vs client-synced |
 | Change events | `IPromptsService.onDidChange*` | `IAgentConnection.rootState` + `SessionCustomizationsChanged` actions |
@@ -24,6 +24,8 @@ Skills are conventionally a folder named after the skill, containing a `SKILL.md
 - **Bad URI.** `ICustomizationItem.uri` for a folder-style skill must point at `<folder>/SKILL.md`, **not** the folder itself. Downstream `IChatCustomizationHarnessService.resolvePromptSlashCommand` and `InputEditorDecorations.updateAsyncInputEditorDecorations` call `parseNew(item.uri)`, which is a file read; passing a directory URI throws `EntryIsADirectory` and silently breaks decorations and slash-command resolution.
 
 The remote provider additionally **skips folder-style skill entries whose `SKILL.md` cannot be read** rather than emitting a known-broken URI. The local provider doesn't need this guard because `findAgentSkills` already filters at index time.
+
+Remote hosts have a management action, `RemoteAgentPluginController.addConfiguredPlugin`, that lets the user add a plugin folder already present on the remote host. It opens an `agent-host://` folder picker rooted at the remote filesystem, converts the selected URI back to the host's original URI, and dispatches `RootConfigChanged` with the updated `AgentHostConfigKey.Customizations` array. Host-owned plugin items get a remove action that writes the same root config; client-synced session customizations are still shown as local-group items but are not removable from the remote host config.
 
 ## Built-in skills (`BUILTIN_STORAGE`)
 
@@ -61,5 +63,6 @@ If you need decorations to survive reload for AH sessions, the pragmatic fix is 
 
 ## Changelog
 
+- **2026-05-01** — b2e6267136 — reconciliation: documented remote host plugin management via `RemoteAgentPluginController` after `e6b9ae7ff17a`; `8dbb8606e2c2` only reinforced the existing final-resource URI contract from the session-handler doc.
 - **2026-04-29** — `fa1adf3685` — added "Built-in skills (`BUILTIN_STORAGE`)" section; updated local-AH table row to include built-in skills; added gotcha for `BUILTIN_STORAGE` throw vs empty-return in `PromptsServiceImpl`. PR [#313277](https://github.com/microsoft/vscode/pull/313277).
 - **2026-04-28** — `258af94280` — initial entry. Captures the local vs remote split, the SKILL-folder convention (frontmatter for `name`/`description`, SKILL.md URI for `item.uri`, skip unreadable SKILL.md entries), the `supportsPromptAttachments: true` capability flag on both AH chat session contributions, and the decoration-revival asymmetry between locally-persisted and AH-restored chat requests.

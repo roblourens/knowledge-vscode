@@ -162,6 +162,7 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 
 ## Changelog
 
+- **2026-05-01** — b2e6267136 — reconciliation: no body changes. `8dbb8606e2c2` and `21706550d0fd` refined the final-resource / session-type plumbing already captured by the chat-session URI ownership section.
 - **2026-04-30** — `928bc0340d` — documented Agent Host chat-session URI ownership: `/untitled-*` is only an internal contributed-chat staging resource, `AgentHostSessionListController.newChatSessionItem` creates the final local URI before first send, provider-created drafts already use final-looking resources, and `AgentHostSessionHandler` derives and requests the canonical AHP URI directly from the chat resource.
 - **2026-04-25** — `89433a4490` — documented the SKILL.md client-side exception to the empty-link-text rewrite in "Remote file links in tool messages": `rewriteLinkTokenRaw` detects `SKILL.md` via `isSkillFileUri`, tags the URI with `?vscodeLinkType=skill`, and preserves the link label (the skill name) so the chat inline anchor widget renders a rich skill pill. Detection lives client-side so no VS Code-specific link metadata leaks into AHP.
 - **2026-04-25** — `99e59eeecd` — documented `AgentHostSessionListController` caching: first `listSessions()` primes the cache; subsequent `refresh()` calls serve from `_items`; `onAgentHostStart` in `AgentHostContribution` calls `resetCache()` to handle agent host restart without registration teardown (AHP notifications not replayed on reconnect). Added gotcha for both invalidation paths.

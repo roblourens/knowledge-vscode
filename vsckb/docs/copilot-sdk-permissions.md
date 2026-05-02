@@ -41,4 +41,5 @@ All callbacks handed to the Copilot SDK (`handlePermissionRequest`, `handleUserI
 
 ## Changelog
 
+- **2026-05-01** — b2e6267136 — reconciliation: no body changes. The auto-approve / plan-mode / activity-event commits in this range preserve the existing permission-callback architecture; the dedicated picker changes are documented in `agent-host-auto-approve-picker.md`.
 - **2026-04-24** — 4b6403a3ab — split permission handling and SDK callback safety out of the Copilot provider overview

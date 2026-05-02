@@ -21,6 +21,8 @@ This doc covers provider lifecycle, metadata, ownership, authentication, session
 - Building SDK session config from active client tools, customizations, hooks, MCP servers, custom agents, skills, and shell tools.
 - Persisting provider-local metadata in the per-session Agent Host database.
 
+`restoreSession(...)` can now resume a known Agent Host-owned session directly from its URI / database metadata. It does not require a successful `listSessions()` catalog pass first, which matters for reopening a stored session when the SDK list is unavailable, stale, or filtered by a different catalog view.
+
 It does not own AHP state shape or workbench rendering. Contract changes belong in [agent-host-protocol](./agent-host-protocol.md); turn execution and rendering belong in [agent-host-session-handler](./agent-host-session-handler.md).
 
 ## Authentication contract
@@ -125,6 +127,7 @@ Run via `npm run test-node -- --grep <pattern>`. Do not use `scripts/test.sh` fo
 
 ## Changelog
 
+- **2026-05-01** — b2e6267136 — reconciliation: documented direct restore without a prior SDK catalog list after `317392ea7d46`; archive/worktree lifecycle prose from `2c0d520761` stayed accurate across `c7dadb49e4f6` cleanup and the later Copilot/Claude-adjacent commits did not change this provider's architectural contract.
 - **2026-04-29** - 2c0d520761 - added Archive lifecycle section: `IAgent.onArchivedChanged?` hook, `CopilotAgent` archive/unarchive worktree cleanup via new `branchExists`/`hasUncommittedChanges`/`addExistingWorktree` helpers on `IAgentHostGitService`, sequenced through `_sessionSequencer`, with skip-on-dirty / skip-on-missing-branch / skip-on-missing-metadata guards. Added `copilot.worktree.path` and `copilot.worktree.repositoryRoot` metadata keys. Added two gotchas (don't derive missing metadata; keep the dirty-skip guard). PR [#313393](https://github.com/microsoft/vscode/pull/313393).
 - **2026-04-28** - 5e0eb8ff17 - bumped `@github/copilot` from `^1.0.34` to `^1.0.38` (root + `remote/`) to track the version pinned in `extensions/copilot/package.json`. No consumer-side changes: the `ICopilotModelInfo` wrapper still absorbs the synthetic `auto` model shape and the real-SDK `listModels` test passes unchanged. `@github/copilot-sdk` stays at `^0.2.2`.
 - **2026-04-24** - 4b6403a3ab - split extension-host CLI parity, permissions, shell tools, and tool display details into focused docs; trimmed this doc back to provider lifecycle, ownership, authentication, metadata, announcements, and provider-level tests.

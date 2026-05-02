@@ -62,4 +62,5 @@ git-blob://<hex(sessionUri)>/<urlencode(sha)>/<hex(repoRelativePath)>/<basename>
 
 ## Changelog
 
+- **2026-05-01** — b2e6267136 — reconciliation: no body changes. `8ae0d8eab63d` introduced the git-driven diffs already documented here; later worktree cleanup, plugin configuration, and activity-event commits in this area did not change the diff architecture or `agentHostDiffs.ts` shape rules.
 - **2026-04-26** — `b86149ad81` — initial entry. PR [#312632](https://github.com/microsoft/vscode/pull/312632).

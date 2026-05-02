@@ -68,6 +68,7 @@ The 2026-04-21 audit intentionally fixed only request lifecycle and structured e
 
 ## Changelog
 
+- **2026-05-01** — b2e6267136 — reconciliation: no body changes. `8dbb8606e2c2` tightened client-requested session URI preservation, which this doc already covered in the session-creation URI ownership section.
 - **2026-04-30** - `928bc0340d` - documented that remote `createSession(config.session)` must honor the client-chosen AHP URI and only generate a new URI when no session was requested.
 - **2026-04-24** — `5407371c47` — reconciliation: no doc changes. Type-prefix renames from `0b4570038fe` (`Adopt renamed agent host protocol types`) only affect import names, not the architectural prose. `dcc7279e0d7` (web connection stability + terminal reconnection), `1f9cd94d0da` (SSH tunnel teardown), `037d32ab6b9` (protocol cleanups), and `2289e091159` (host-level settings) live below the architectural concepts this doc describes; the open reconnect/replay and transport close-semantics debt is unchanged.
 - **2026-04-21** - `b1564bc1e1` - initial entry after the remote protocol client lifecycle cleanup and Copilot review follow-up.

@@ -2,7 +2,7 @@
 
 _Covers: src/vs/sessions/contrib/chat/browser/agentHost/agentHostPermissionPickerDelegate.ts, src/vs/sessions/contrib/chat/browser/agentHost/agentHostPermissionPickerActionItem.ts, src/vs/sessions/contrib/chat/browser/agentHost/agentHostSessionConfigPicker.ts, src/vs/sessions/contrib/copilotChatSessions/browser/permissionPicker.ts, src/vs/workbench/contrib/chat/browser/widget/input/permissionPickerActionItem.ts_
 
-The auto-approve permission picker is the dropdown that lets a user pick `Default` / `Bypass Approvals` / `Autopilot` for a chat session. For agent-host sessions the level lives in AHP session-config under the well-known `autoApprove` property name. This doc covers how that one wire-level value plugs into the **two existing picker widgets** depending on where it renders, and how non-conforming agents fall back to the generic per-property picker.
+The auto-approve permission picker is the dropdown that lets a user pick `Default` / `Bypass Approvals` / `Autopilot` for a chat session. For agent-host sessions the level lives in AHP session-config under the well-known `autoApprove` property name. The adjacent Agent Host mode picker handles the separate well-known `mode` property (`interactive` / plan-style modes) with its own UI. This doc covers how the `autoApprove` wire-level value plugs into the **two existing picker widgets** depending on where it renders, how the mode picker avoids the generic per-property fallback, and how non-conforming agents fall back to the generic per-property picker.
 
 ## The two-widget split (and why we keep both)
 
@@ -50,7 +50,7 @@ For VS Code to render the unified picker (with its built-in warning dialogs, aut
 
 `isWellKnownAutoApproveSchema(schema)` (exported from `agentHostPermissionPickerDelegate.ts`) is the predicate; it imports the value set `KNOWN_AUTO_APPROVE_VALUES` and the property name `SessionConfigKey.AutoApprove` from `src/vs/platform/agentHost/common/sessionConfigKeys.ts` — the platform-side source of truth for well-known config keys (`AutoApprove`, `Permissions`, `Isolation`, `Branch`, `BranchNameHint`). Agents that advertise `autoApprove` with a *different* shape (extra enum values, different type) **do not** get the unified picker — they fall back to the generic per-property picker in `agentHostSessionConfigPicker.ts`. This is intentional: a hostile or legacy agent can't trick the unified picker into rendering against an unsupported schema, and a non-conforming agent isn't left with no UI at all.
 
-The property name itself is `SessionConfigKey.AutoApprove` (`'autoApprove'`); there is no longer a separate `AUTO_APPROVE_PROPERTY` constant in the delegate — the platform-side enum is the single source of truth, and the delegate is now a consumer of it.
+The property name itself is `SessionConfigKey.AutoApprove` (`'autoApprove'`); there is no longer a separate `AUTO_APPROVE_PROPERTY` constant in the delegate — the platform-side enum is the single source of truth, and the delegate is now a consumer of it. The same platform-side enum also contains `SessionConfigKey.Mode` (`'mode'`) for the dedicated Agent Host mode picker; do not model mode as another auto-approve enum value.
 
 > Note: `SessionConfigPropertySchema` is no longer string-enum-only — the protocol now expresses `string` / `number` / `boolean` / `array` / `object` schemas with `items` / `properties` / `required`. The recognition predicate still narrows to the string-enum case because that's what the unified picker UI knows how to render; everything else flows into the generic per-property picker.
 
@@ -62,6 +62,10 @@ The property name itself is `SessionConfigKey.AutoApprove` (`'autoApprove'`); th
 - **`MenuId.ChatInputSecondary` → `AgentHostPermissionPickerActionItem`** (a thin subclass of `PermissionPickerActionItem`). The subclass owns its own delegate and calls `this.refresh()` from an `autorun` over `delegate.currentPermissionLevel` (the base class renders pull-style on demand). It also adds an `autorun` in `render()` that toggles `this.element.style.display` based on `delegate.isApplicable` — same reactive-hide pattern, different mechanism because the workbench widget doesn't expose the slot directly.
 
 The generic per-property loop in `AgentHostSessionConfigPicker._renderConfigPickers` skips `autoApprove` only when its schema matches `isWellKnownAutoApproveSchema`. Otherwise it includes it, so non-conforming agents get a usable picker.
+
+`AgentHostSessionConfigPicker` also recognizes a well-known `mode` property through `isWellKnownModeSchema(schema)`: a string enum containing at least `interactive`. When that predicate matches, the generic per-property loop skips `mode` and the dedicated `AgentHostModePicker` owns the UI. This keeps execution mode (interactive / planning-style behavior) visually and semantically separate from the permission level (`default` / `autoApprove` / `autopilot`).
+
+The generic picker path still applies auto-approve policy filtering for conforming values that render outside the unified widget: `chat.autopilot.enabled` hides `autopilot`, and a policy value of `chat.tools.global.autoApprove = false` disables both `autoApprove` and `autopilot` choices. Elevated choices show one warning per VS Code session; confirming `autopilot` also counts as accepting the lower `autoApprove` warning.
 
 ## Why the visibility check has to be reactive
 
@@ -104,6 +108,7 @@ The tests use a fake provider and exercise the delegate in isolation. The widget
 
 ## Changelog
 
+- **2026-05-01** — b2e6267136 — reconciliation: documented the dedicated well-known `mode` picker and generic-picker auto-approve filtering after `75ec86b07f24`; no structural changes needed for the picker polish / policy-level commits because the existing delegate and schema sections still describe the architecture.
 - **2026-04-24** — `5407371c47` — reconciliation: well-known config keys moved to `src/vs/platform/agentHost/common/sessionConfigKeys.ts` (`SessionConfigKey.AutoApprove`, `KNOWN_AUTO_APPROVE_VALUES`) as the platform-side source of truth; the delegate's own `AUTO_APPROVE_PROPERTY` constant is gone (commit `1453f5b4e9b`). Noted that `SessionConfigPropertySchema` widened beyond string-enum (now `string|number|boolean|array|object` with `items`/`properties`/`required`) and that the recognition predicate still narrows to string-enum on purpose. Centralized agent-host schema descriptors now live in `agentHostSchema.ts` and are composed by `copilotAgent.resolveSessionConfig`.
 - **2026-04-21** — `ad531180d0` — reconciliation: updated delegate-shape notes after `9a5b0119f0c` added workbench-only extension-contributed permission groups to `PermissionPickerActionItem`; `d844c098294` added tap handling to the sessions picker but did not change the agent-host architecture.
 - **2026-04-20** — `7f8e7e0f0c` — initial entry. Captures the two-widget split (`PermissionPicker` for `NewSessionControl`, `PermissionPickerActionItem` for `ChatInputSecondary`), the shared `AgentHostPermissionPickerDelegate`, the well-known `autoApprove` schema convention and recognition predicate, the fallback to the generic per-property picker for non-conforming agents, and the reactive-visibility pattern needed for action-view-item factories.

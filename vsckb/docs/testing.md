@@ -137,6 +137,7 @@ Otherwise — single class or function, drive with events, assert on state?
 
 ## Changelog
 
+- **2026-05-01** — b2e6267136 — reconciliation: no body changes. New Claude/Copilot API/unit coverage and shell/restore tests fit the existing four-layer model; no new runner or workflow rule was introduced.
 - **2026-04-28** — `5e0eb8ff17` — moved the `unset ELECTRON_RUN_AS_NODE` requirement inline into the § 3 real-SDK invocation block (was only in the workflow-tips section, easy to miss when copy-pasting); added an explicit `--grep "<test name>"` reminder so finalize sessions don't re-run the full suite for a single check; rewrote the rename-audit gotcha to point back at § 3 instead of repeating the bare command without the `unset`.
 
 - **2026-04-26** — `b86149ad81` — added debt entry for `agentHostDiffs.ts` having no unit tests; two bugs (added-file and deleted-file diff rendering) were both caught manually in the product rather than by a test.

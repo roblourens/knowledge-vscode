@@ -8,6 +8,8 @@ _Covers: src/vs/platform/agentHost/node/copilot/copilotShellTools.ts, src/vs/pla
 
 `ShellManager` provides per-session persistent bash/PowerShell shells backed by `IAgentHostTerminalManager` PTYs. The shells override the SDK's built-in shell tools (`overridesBuiltInTool: true`) so commands run inside our terminal infrastructure with shell integration and the AHP terminal subscription.
 
+Primary `bash` / `powershell` calls acquire an exclusive shell reference through `getOrCreateShell(...)`. An idle shell of the right type can be reused, but a shell running a command is tracked in `_busyShellIds` and skipped so concurrent primary tool calls get independent terminals instead of interleaving input/output in the same PTY. `read_*`, `write_*`, `list_*`, and shutdown helpers operate on existing shells and keep `skipPermission: true` as described below.
+
 ## Permission asymmetry
 
 Secondary shell tools must set `skipPermission: true`. The SDK's built-in `read_bash` / `write_bash` / `stop_bash` / `list_bash` (and PowerShell variants) never call `permissions.request` — verified in `node_modules/@github/copilot/sdk/index.js`. Only the primary `bash` / `powershell` tool prompts. So in the upstream Copilot CLI and the in-tree extension, users never see a dialog for these helpers because the SDK never asks.
@@ -33,4 +35,5 @@ For bash/zsh, command lines written via `executeCommandWithShellIntegration` and
 
 ## Changelog
 
+- **2026-05-01** — b2e6267136 — reconciliation: documented independent terminal allocation for concurrent primary shell calls after `cfa5454b64c5`; `b9acc7f21912` only changed terminal-tool instructions, not shell-tool architecture.
 - **2026-04-24** — 4b6403a3ab — split managed shell behavior, permission asymmetry, and history suppression out of the Copilot provider overview

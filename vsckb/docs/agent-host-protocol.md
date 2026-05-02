@@ -51,6 +51,8 @@ Session subscriptions are the only ones with optimistic dispatch: a client appli
 
 This is the right place to look when reasoning about what state a client sees vs. what the server has applied. Client code should always read state through a subscription — never reach for the server directly.
 
+For observable consumers, `observableFromSubscription(owner, sub)` adapts an `IAgentSubscription<T>` into `IObservable<T | undefined>`. It deliberately maps pre-snapshot and error states to `undefined`; callers that need to surface the actual `Error` should read `sub.value` directly.
+
 ## Action envelopes
 
 Every server-applied action is wrapped in an `ActionEnvelope`:
@@ -113,6 +115,7 @@ Protocol-generated types do **not** carry an `I` prefix. The shapes generated un
 
 ## Changelog
 
+- **2026-05-01** — b2e6267136 — reconciliation: added the observable adapter note after `b9ef6afd4e5a` introduced `observableFromSubscription`; no body changes needed for `SessionState._meta.git` (`1fa1b7af5c19`) because the existing `_meta` section already captured that well-known slot.
 - **2026-04-25** — `8e9b24cedf` — documented the `SessionState._meta` well-known-keyed slot and the first well-known key `git` (`SESSION_META_GIT_KEY`, `ISessionGitState`, `readSessionGitState` / `withSessionGitState` in `sessionState.ts`), dispatched by `SessionMetaChanged` and applied via `setSessionMeta`. See [agent-host-sessions-providers](./agent-host-sessions-providers.md#surfacing-session-_metagit-to-workspacerepositories0) for how the agents-app changes view consumes it (PR [#312543](https://github.com/microsoft/vscode/pull/312543)).
 - **2026-04-24** — `5407371c47` — reconciliation: dropped the `I` prefix from generated protocol types in "Important types" and the `ActionEnvelope` snippet (`0b4570038fe` "Adopt renamed agent host protocol types"). Added `RootConfigState` (host-level config on `RootState`, commit `779b23b6196`), `ConfirmationOption`/`ConfirmationOptionKind` for richer permission choices on tool-call confirmations (`779b23b6196`), `SessionStatus` bit flags replacing `isRead`/`isDone` (`037d32ab6b9`), `InitializeParams.locale` (`779b23b6196`), and the eager `activeClient` parameter on `createSession` (`886c556841c`). Noted that session config values widened from `Record<string, string>` to `Record<string, unknown>` and that `SessionConfigChanged` accepts `replace?: boolean`.
 - **2026-04-20** — `d05eca7455` — added a "Patterns and gotchas" entry and matching `## Debt & gotchas` entry covering the AHP authentication contract: `required: true` resources MUST throw `AHP_AUTH_REQUIRED`, not return empty results. Triggered by the renderer-side cache-bug investigation in `changes/2026-04-20-fix-initial-session-list-display/`.
