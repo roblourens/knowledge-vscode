@@ -1,6 +1,6 @@
 # Copilot SDK Tool Display
 
-_Covers: src/vs/platform/agentHost/node/copilot/copilotToolDisplay.ts, src/vs/platform/agentHost/node/copilot/mapSessionEvents.ts, src/vs/platform/agentHost/common/commandLineHelpers.ts, src/vs/platform/agentHost/test/node/copilotToolDisplay.test.ts, src/vs/platform/agentHost/test/common/commandLineHelpers.test.ts, extensions/copilot/src/extension/chatSessions/copilotcli/common/copilotCLITools.ts_
+_Covers: src/vs/platform/agentHost/node/copilot/copilotToolDisplay.ts, src/vs/platform/agentHost/node/copilot/mapSessionEvents.ts, src/vs/platform/agentHost/common/commandLineHelpers.ts, src/vs/platform/agentHost/test/node/copilotToolDisplay.test.ts, src/vs/platform/agentHost/test/common/commandLineHelpers.test.ts, extensions/copilot/src/extension/chatSessions/copilotcli/common/copilotCLITools.ts, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/stateToProgressAdapter.ts, src/vs/workbench/contrib/chat/browser/widget/chatContentParts/chatThinkingContentPart.ts_
 
 `copilotToolDisplay.ts` normalizes Copilot SDK tool calls into the generic display fields (`displayName`, `invocationMessage`, `pastTenseMessage`, `confirmationTitle`) that flow through AHP as `StringOrMarkdown`. `mapSessionEvents.ts` handles history replay of SDK events, while `commandLineHelpers.ts` rewrites shell command display at the AHP boundary.
 
@@ -52,6 +52,26 @@ Reasoning text reaches AHP state through **two independent code paths** that mus
 
 The "warm vs cold" split matters: `AgentService.restoreSession` short-circuits if the session is already in `_stateManager`. Cold restores (process restart, never-touched sessions) hit the history-replay path; warm restores return the in-memory state built by the live path. Both paths must produce the same ordering, or the same session can render correctly one moment and bunched the next.
 
+## Search tools (grep and rg)
+
+`grep` and `rg` are treated as first-class search tools with their own named cases throughout `copilotToolDisplay.ts`. Each has a **separate typed interface** (`ICopilotGrepToolArgs`, `ICopilotRgToolArgs`) matching the real SDK schema — both have the same fields (`pattern`, `path`, `glob`, `type`, `-i`, `-A`, `-B`, `-C`, `-n`, `head_limit`, `multiline`, `output_mode`) but are kept separate so they can evolve independently. They are **never merged** into one "search family" interface even though they currently happen to share the same shape. The `rg` cases reuse the `grep` l10n keys to avoid duplicate translator strings, but the code branching stays distinct.
+
+Display messages are intentionally minimal: just `Searching for {pattern}` / `Searched for {pattern}`. No filter flags, no glob details. This is a deliberate house style: keep invocation messages readable rather than exhaustive.
+
+`SEARCH_TOOL_NAMES` (a `Set<string>` in `copilotToolDisplay.ts`) enumerates both `CopilotToolName.Grep` and `CopilotToolName.Rg`. `getToolKind()` returns `'search'` for any name in that set, which `mapSessionEvents.ts` stores as `IToolStartInfo.toolKind`.
+
+## Search tool icon via toolSpecificData
+
+To surface a search icon in the workbench chat UI, search tools set `toolSpecificData = { kind: 'search' }` (type `IChatSearchToolInvocationData`, defined in `chatService.ts`). This follows the same pipeline used for terminal tools:
+
+1. `getToolKind()` in `copilotToolDisplay.ts` returns `'search'` for grep/rg.
+2. `mapSessionEvents.ts` stores `toolKind: 'search'` on `IToolStartInfo`.
+3. `stateToProgressAdapter.ts` reads the toolKind and sets `toolSpecificData = { kind: 'search' }` on the `IChatToolInvocation` model, for both running and completed states.
+4. **Outer (type) icon**: `chatThinkingContentPart.ts` checks `toolSpecificData?.kind === 'search'` (the `isSearchTool` variable) and sets the outer icon to `Codicon.search`. This is the same layer that checks `isTerminalTool` to show `Codicon.terminal`.
+5. **Inner (status) icon**: `BaseChatToolInvocationSubPart.getIcon()` returns check/spinner based on completion state — unchanged for search tools.
+
+**Do not** implement the icon by calling `getToolInvocationIcon(toolId)` from `chatThinkingContentPart.ts` (which matches tool IDs by substring). That approach hardcodes copilot tool IDs at the render layer. The `toolSpecificData.kind` path is preferred because the semantic information is carried in typed AHP state rather than inferred at render time from a string.
+
 ## Skill events
 
 The Copilot SDK invokes "skills" (markdown files describing reusable tasks) via a `skill` tool, but the more useful signal is the separate `skill.invoked` lifecycle event that carries `{ name, path, description, ... }`. Agent Host **hides the raw `skill` tool** (via `HIDDEN_TOOL_NAMES`) and **synthesizes** a `tool_start` / `tool_complete` pair from `skill.invoked` instead, so the chat UI shows one clickable file link rather than a name-only tool row.
@@ -86,7 +106,8 @@ The extension-host Copilot CLI cannot do this synthesis — it only sees the `sk
 - **gotcha** (2026-04-25, copilotToolDisplay.ts:synthesizeSkillToolEvents/getSkillSyntheticToolCallId) — synthesized tool-call ids for non-tool SDK events (skills, future synthetic events) MUST never embed raw filesystem paths. `ChatResponseResource.createUri(..., toolCallId, ...)` builds `/tool/${toolCallId}/${index}` paths, so a `/` in the id breaks URI parsing downstream. The fallback path in `getSkillSyntheticToolCallId` hashes its seed (`hash(seed).toString(16)`) for this reason; the `eventId` branch is safe because SDK event ids are opaque tokens.
 - **gotcha** (2026-04-25, copilotToolDisplay.ts:synthesizeSkillToolEvents) — when a markdown link's label is built from agent-controlled data and rendered by something that extracts the link text without re-parsing markdown (e.g. the chat skill pill / inline anchor widget), use `escapeMarkdownLinkLabel` from `vs/base/common/htmlContent.ts`, NOT the broader `escapeMarkdownSyntaxTokens`. The latter escapes `*_-.~+!{}()` as well, which then leak through as visible backslashes (`heap\-snapshot\-analysis`). `escapeMarkdownLinkLabel` only escapes `\` and `]` — the chars that actually break out of `[label](url)` syntax.
 - **gotcha** (2026-04-25, mapSessionEvents.ts / copilotAgentSession.ts) — `skill.invoked` is the reliable signal that a skill was invoked. The SDK only **sometimes** also injects a synthetic `user.message` carrying the skill content — the behavior varies by SDK code path / skill type. Filter synthetic messages on `source && source.toLowerCase() !== 'user'`; sessions persisted before the `source` field existed (and any future SDK code path that omits it) will leak stray skill-content user turns. We accept this rather than detect skill content heuristically.
-- **gotcha** (2026-04-25, copilotAgentSession.ts:_subscribeToEvents/_subscribeForLogging) — these two methods are split by intent. Anything that fires `_onDidSessionProgress` belongs in `_subscribeToEvents` (where `session = this.sessionUri` is in scope); pure trace-logging belongs in `_subscribeForLogging`. The skill-event synthesis lives in `_subscribeToEvents` for this reason — moving it back to `_subscribeForLogging` would lose access to `session`.
+- **gotcha** (2026-05-02, copilotToolDisplay.ts:ICopilotGrepToolArgs/ICopilotRgToolArgs) — `grep` and `rg` look like ideal candidates for a shared "search tools" interface because they currently have identical schemas, but they are intentionally kept as **separate per-tool interfaces**. The SDK can evolve each tool's args independently; merging them loses type safety at the point of use and causes breakage when they diverge. When adding any new Copilot SDK tool, always model a single dedicated interface, even if it looks like an existing one.
+- **gotcha** (2026-05-02, chatThinkingContentPart.ts / BaseChatToolInvocationSubPart.getIcon()) — the chat tool row has **two distinct icon layers**: (1) an **outer "type" icon** rendered by `chatThinkingContentPart.ts` inside `.chat-thinking-tool-wrapper`, which shows what kind of tool it is (`Codicon.terminal`, `Codicon.search`, `Codicon.tools` fallback); (2) an **inner "status" icon** rendered by `ChatProgressSubPart` / `getIcon()` inside `.progress-container`, which shows completion state (check / spinner). Both render simultaneously. When adding a new toolSpecificData kind, add an `isFooTool` branch to the outer-icon logic in `chatThinkingContentPart.ts` to set the type icon. Do **not** override `getIcon()` for the same purpose — that would show both the new icon and the type icon, giving a double-icon row (the bug this session fixed).
 
 ## Related
 
@@ -97,6 +118,7 @@ The extension-host Copilot CLI cannot do this synthesis — it only sees the `sk
 
 ## Changelog
 
+- **2026-05-02** — d7edc11461 — added "Search tools (grep and rg)" section: separate ICopilotGrepToolArgs/ICopilotRgToolArgs interfaces, SEARCH_TOOL_NAMES, getToolKind returning 'search', IChatSearchToolInvocationData toolSpecificData pipeline, and the two-layer outer/inner icon architecture. Added gotchas: never merge per-tool interfaces; the double-icon bug and how to add type icons via the outer layer.
 - **2026-05-01** — b2e6267136 — reconciliation: removed stale generic-mapper coverage after `2a5c152b65b9` dropped that abstraction; current ownership is `copilotAgentSession.ts` live events plus `mapSessionEvents.ts` history replay, with `copilotToolDisplay.test.ts` covering display normalization. Reworded the multi-round reasoning gotcha in current file terms instead of deleting it.
 - **2026-04-28** — 22c8ec60f5 — renamed "History replay and reasoning order" → "Reasoning ordering: live and history-replay paths"; documented the live-path symmetry rule for clearing both markdown and reasoning part ids on `tool_start`; added coverage for the live mapper then used at the time; added gotcha for the multi-round reasoning bunching bug.
 - **2026-04-25** — 89433a4490 — added "Skill events" section: hide the `skill` tool, synthesize `tool_start`/`tool_complete` pair from `skill.invoked` via `synthesizeSkillToolEvents`, filter synthetic `user.message` injections by `source`. Trimmed `skill` from the specialized-tools debt bullet. Added gotchas: synthetic toolCallIds must not embed raw paths (use `hash` of seed); link labels in markdown for skill-pill-style renderers need the narrower `escapeMarkdownLinkLabel`, not `escapeMarkdownSyntaxTokens`; the SDK only sometimes injects a `user.message` for a skill so legacy sessions leak; `_subscribeToEvents` vs `_subscribeForLogging` split.
