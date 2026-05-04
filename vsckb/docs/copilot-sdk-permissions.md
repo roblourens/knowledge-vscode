@@ -26,11 +26,25 @@ Reference code in the Copilot CLI extension:
 
 All callbacks handed to the Copilot SDK (`handlePermissionRequest`, `handleUserInputRequest`, pre/post tool use hooks, and client tool handlers) are wrapped in try/catch that logs via `logService.error()` then rethrows. This is necessary because the SDK catches unhandled callback exceptions and converts them into generic failures (for example, "Permission denied and could not request permission from user") with no logging. Without the wrapper, bugs like missing DI services produce untraceable permission denials.
 
+## Subagent event routing
+
+`CopilotAgentSession` must route SDK events to the correct AHP session scope — parent or one of its subagents. The key routing state:
+
+- **`_parentToolCallIdsByAgentId: Map<string, string>`** — populated by `onSubagentStarted`. When the SDK fires `subagent.started`, the event carries both the SDK-level `agentId` (event-scoped identifier for the subagent process) and the `toolCallId` that spawned it. This map records `agentId → toolCallId`.
+- **`_parentToolCallIdForSubagentEvent(e)`** — looks up `e.agentId` in the map; returns `undefined` if the agent is unmapped (e.g. if the event arrives out of order before `subagent.started`).
+- **`_shouldDropUnmappedSubagentEvent(e, eventName)`** — if `agentId` has no mapping, logs a warning and returns `true`. Events with unmapped `agentId` are **dropped**, not buffered. The SDK guarantees `subagent.started` fires before any child `agentId`-tagged events; out-of-order events indicate an SDK contract violation.
+
+**Why `agentId`, not `data.parentToolCallId`:** The Copilot SDK deprecated `data.parentToolCallId` in favor of event-level `agentId` fields. Do not use `data.parentToolCallId` for routing; it is not reliably populated and may be absent in new SDK versions.
+
+**Per-subagent response part IDs:** `_currentMarkdownPartIds` and `_currentReasoningPartIds` are `Map<string, string>` keyed by `parentToolCallId ?? ''` (the empty-string key covers the root/parent session). A single global for each would cause subagent text deltas to overwrite the parent session's active part tracker: after the subagent finishes and the parent resumes streaming its final reply, the parent's `onMessageDelta` would see a stale part id and fail to open/continue the correct markdown part. The result is the final parent assistant message never rendering live (it only appears after a nav away and back, which forces a restore from disk).
+
 ## Debt & gotchas
 
 - **gotcha** (2026-04-19, copilotAgentSession.ts:handlePermissionRequest) — Copilot SDK write permission requests identify the target via `request.fileName`, NOT `request.path`. Read requests use `request.path`. Mixing them up silently causes auto-approval to miss the target path and fall through to the user-confirmation codepath.
 - **gotcha** (2026-04-19, copilotAgentSession.ts) — ALL callbacks handed to the Copilot SDK must wrap in try/catch + `logService.error()` + rethrow. The SDK silently swallows unhandled callback exceptions and converts them to generic error responses ("Permission denied", "Could not request input") with no logging. Without the wrapper, DI failures and other bugs in callbacks are untraceable.
 - **gotcha** (2026-04-19, copilotAgentSession.ts:getCopilotCLISessionStateDir) — prefer `INativeEnvironmentService.userHome.fsPath` over `import { homedir } from 'os'` for the home directory. The service is available in the agent-host process (registered in both startup paths) and makes testing easier.
+- **gotcha** (2026-05-04, copilotAgentSession.ts:_parentToolCallIdsByAgentId) — subagent events carry an event-level `agentId` field, NOT the deprecated `data.parentToolCallId`. The routing map (`agentId → toolCallId`) is populated by `subagent.started`. Do not read `data.parentToolCallId` for routing; it is absent in current SDK versions.
+- **gotcha** (2026-05-04, copilotAgentSession.ts:_currentMarkdownPartIds / _currentReasoningPartIds) — these are `Map<string, string>` keyed by `parentToolCallId ?? ''`, NOT single globals. Using a single global causes subagent text deltas to clobber the parent session's active part id; after the subagent completes, the parent's final assistant message never appends to the right part during live streaming (the message renders only after a nav-away-and-back restore). The empty-string key represents the root/parent session scope.
 
 ## Related
 
@@ -41,5 +55,6 @@ All callbacks handed to the Copilot SDK (`handlePermissionRequest`, `handleUserI
 
 ## Changelog
 
+- **2026-05-04** — 81095cbaba — added "Subagent event routing" section documenting `_parentToolCallIdsByAgentId`, event-level `agentId` routing, `_shouldDropUnmappedSubagentEvent`, and per-subagent `_currentMarkdownPartIds`/`_currentReasoningPartIds` Maps. Added two gotchas: `data.parentToolCallId` is deprecated (use event-level `agentId`); the part-id Maps must be per-subagent or the parent's final live message is clobbered.
 - **2026-05-01** — b2e6267136 — reconciliation: no body changes. The auto-approve / plan-mode / activity-event commits in this range preserve the existing permission-callback architecture; the dedicated picker changes are documented in `agent-host-auto-approve-picker.md`.
 - **2026-04-24** — 4b6403a3ab — split permission handling and SDK callback safety out of the Copilot provider overview
