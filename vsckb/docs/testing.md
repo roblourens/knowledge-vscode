@@ -12,7 +12,8 @@ The agent host has four distinct test layers, each with its own runner, scope, a
 
 **Where they live:**
 - Platform layer: `src/vs/platform/agentHost/test/node/*.test.ts`
-- Workbench adapters: `src/vs/workbench/contrib/chat/test/browser/agentSessions/**/*.test.ts`, `src/vs/workbench/contrib/chat/test/browser/agentHost/*.test.ts`
+- Shared/common helpers: `src/vs/platform/agentHost/test/common/*.test.ts`
+- Workbench adapters: `src/vs/workbench/contrib/chat/test/browser/agentSessions/**/*.test.ts`, `src/vs/workbench/contrib/chat/test/browser/agentHost/*.test.ts`. `agentSessions/agentHostPermissionUiContribution.test.ts` covers the remote-host local-file permission prompt bridge.
 - Sessions app: `src/vs/sessions/test/**/*.test.ts`
 - UI content parts: `src/vs/workbench/contrib/chat/test/browser/widget/chatContentParts/*.test.ts`
 
@@ -136,6 +137,8 @@ Otherwise — single class or function, drive with events, assert on state?
 - **gotcha** (2026-04-22, protocol/toolApprovalRealSdk.integrationTest.ts) — when asserting on shell-command text the SDK emitted, anchor the regex with `^` and explicitly tolerate quoted variants (`cd "<dir>"` vs `cd <dir>`) and both chain operators (`&&` and `;`). A naked `String.includes("cd " + tempDir)` substring check misses quoted forms and is also tripped by tempDir appearing later in the same command. The cd-prefix-strip test uses `new RegExp('^cd (?:"' + esc + '"|' + esc + ')\\s*(?:&&|;)')` against the rewritten and the original command lines.
 
 ## Changelog
+
+- **2026-05-04** — 939d3f227c — reconciliation: added the common-helper test location and called out the new permission UI coverage from `c30ed7c4a51`; no workflow change for protocol-version, session-diff, shell, or restore tests added in `e1a89568eb2`, `fd6d37812b4`, `6bdca786907`, `882f02a7bd5`, and `8309b22051c` because they fit the existing four-layer model.
 
 - **2026-05-01** — b2e6267136 — reconciliation: no body changes. New Claude/Copilot API/unit coverage and shell/restore tests fit the existing four-layer model; no new runner or workflow rule was introduced.
 - **2026-04-28** — `5e0eb8ff17` — moved the `unset ELECTRON_RUN_AS_NODE` requirement inline into the § 3 real-SDK invocation block (was only in the workflow-tips section, easy to miss when copy-pasting); added an explicit `--grep "<test name>"` reminder so finalize sessions don't re-run the full suite for a single check; rewrote the rename-audit gotcha to point back at § 3 instead of repeating the bare command without the `unset`.

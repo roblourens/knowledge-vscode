@@ -41,6 +41,8 @@ Shows dev tunnels from `ITunnelAgentHostService.listTunnels()`. The picker opens
 
 Accepts `IShowRemoteHostOptionsOptions.showBackButton` and returns `'back' | undefined`.
 
+If the provider status is `RemoteAgentHostConnectionStatus.incompatible`, the options picker sets a sticky warning validation message before showing the actions. The message includes the protocol version VS Code offered, the versions the remote host reported (when available), and tells the user to update one side. Reconnect is still offered; manual reconnect clears the sticky incompatible state before trying again. Ordinary disconnected/network states keep the existing reconnect behavior and do not show the protocol-version validation banner.
+
 ## Session workspace picker inline remove
 
 The session workspace picker (`sessionWorkspacePicker.ts`) shows remote host rows in the Remote tab. Rows with `onRemove` get the shared ActionList close button (`$(close)`) rendered by `actionList.ts`.
@@ -97,6 +99,8 @@ The one **legitimate exception** is transitioning from `actionWidgetService.hide
 - **gotcha** (2026-04-26, remoteAgentHostActions.ts:configureSSHHosts run + promptToConnectViaSSH) — back-button callbacks propagate via `commandService.executeCommand(id, onBack)`. The `Action2.run(accessor, onBack?)` receives the callback as the second arg. All actions in this module that can be invoked both directly (no back button) and from a parent picker (with back button) follow this pattern. Do not move to a service/context — the callback captures the parent picker's closure.
 
 ## Changelog
+
+- **2026-05-04** — 939d3f227c — reconciliation: documented the incompatible-protocol validation banner and manual reconnect behavior from `e1a89568eb2`; no body change needed for mobile workspace-picker layout polish in `2fc10e36d28` beyond existing picker semantics.
 
 - **2026-05-02** — `b61ea2452e` — documented the shared remote-host remove/reconnect helpers, workspace-picker inline X semantics, and the async ActionList remove path needed for tunnel-backed providers.
 - **2026-04-26** — `eb9ae3f827` — initial entry: SSH picker UX (dynamic new-host item, footer items, no "Enter manually"), Configure SSH Hosts file picker, tunnel picker, per-remote options, standalone manage picker, back-button threading, DisposableStore pattern, `ensureUserSSHConfig` throw-on-error contract.

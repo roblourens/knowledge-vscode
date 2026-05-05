@@ -6,17 +6,34 @@ _Covers: src/vs/platform/agentHost/browser/remoteAgentHostProtocolClient.ts, src
 
 For the broader local/remote topology, start with [agent-host-topology](./agent-host-topology.md). For the protocol contract and generated command/action types, see [agent-host-protocol](./agent-host-protocol.md).
 
+## Handshake and version mismatch
+
+`connect()` sends `initialize` with `protocolVersions: [PROTOCOL_VERSION]`, where `PROTOCOL_VERSION` comes from the generated `state/protocol/version/registry.ts`. The server selects a version and returns it in `InitializeResult.protocolVersion`; the current VS Code client offers one generated version, but the wire shape is already an ordered SemVer list.
+
+If the host rejects the handshake with `UnsupportedProtocolVersion` (-32005), the error remains a structured `ProtocolError` with typed `UnsupportedProtocolVersionErrorData.supportedVersions`. The higher-level remote host services convert that through `RemoteAgentHostConnectionStatus.fromConnectError(...)` into an `incompatible` status. That status is intentionally sticky: WebSocket, SSH, and tunnel paths suppress automatic reconnect for protocol mismatches, but manual Reconnect clears the state and tries again.
+
 ## Request lifecycle
 
 Outgoing JSON-RPC requests are correlated by numeric id in `_pendingRequests`. The client now makes the lifecycle rule explicit:
 
 - A matching response completes or rejects exactly one pending request, then removes it from the map.
-- A transport close rejects every pending request with `RemoteAgentHostProtocolError.connectionClosed(address)`.
-- Client disposal rejects every pending request with `RemoteAgentHostProtocolError.disposed(address)`.
+- A transport close rejects every pending request with a `ProtocolError` from `connectionClosedError(address)`.
+- Client disposal rejects every pending request with a `ProtocolError` from `connectionDisposedError(address)`.
 - Requests started after close/dispose reject immediately and do not send on the transport.
 - Explicit client-transport `connect()` is raced against close/dispose before `initialize`; disposal during a never-resolving transport connect rejects promptly.
 
-`RemoteAgentHostProtocolError` preserves JSON-RPC `code`, `message`, and optional `data`. Prefer checking `code` over matching strings. The local synthetic close/dispose code is currently `-32000` because these failures happen client-side before a server-defined AHP error exists.
+`ProtocolError` preserves JSON-RPC `code`, `message`, and optional `data`. Prefer checking `code` over matching strings. The local synthetic close/dispose code is currently `-32000` because these failures happen client-side before a server-defined AHP error exists.
+
+## Reverse filesystem permissions
+
+Remote hosts can ask the client to read/write/list/delete/move resources through reverse JSON-RPC. Those requests are gated by `IAgentHostPermissionService` before they touch `IFileService`:
+
+- Read/list requests need a read grant; write/delete need a write grant; move needs read on the source and write on the destination.
+- URIs are canonicalized through `IFileService.realpath` before comparison so `..` and symlink escapes do not bypass an existing grant.
+- Denials return `PermissionDenied` (-32009) with `PermissionDeniedErrorData.request`; the host can then issue reverse `resourceRequest` and retry if the user grants access.
+- Outgoing `activeClient.customizations` refs get implicit read grants so synced customization/plugin files remain friction-free.
+
+The prompt UI lives outside this client in `AgentHostPermissionUiContribution`; the client only asks the permission service and reports typed protocol errors.
 
 ## Session creation URI ownership
 
@@ -30,7 +47,7 @@ Most requests use the generated protocol `ICommandMap`. VS Code also has a small
 
 ## Disposal ordering
 
-`RemoteAgentHostProtocolClient.dispose()` calls `_handleClose(RemoteAgentHostProtocolError.disposed(...))` before `super.dispose()`. This ordering is load-bearing. `Disposable` field initializers register emitters before constructor-registered disposables, so a `toDisposable(...)` registered in the constructor runs after the `_onDidClose` emitter has already been disposed. `_raceClose()` relies on `onDidClose`, so disposal must mark the client closed and fire the close event before superclass disposal begins.
+`RemoteAgentHostProtocolClient.dispose()` calls `_handleClose(connectionDisposedError(...))` before `super.dispose()`. This ordering is load-bearing. `Disposable` field initializers register emitters before constructor-registered disposables, so a `toDisposable(...)` registered in the constructor runs after the `_onDidClose` emitter has already been disposed. `_raceClose()` relies on `onDidClose`, so disposal must mark the client closed and fire the close event before superclass disposal begins.
 
 Some transports also emit `onClose` from their own `dispose()` path. Intentional client disposal should still surface as `Connection disposed`, not `Connection closed`, so the client-level close marker must win before the transport is disposed.
 
@@ -67,6 +84,8 @@ The 2026-04-21 audit intentionally fixed only request lifecycle and structured e
 - **gotcha** (2026-04-21, remoteAgentHostProtocolClient.ts:dispose) - disposal must call `_handleClose(disposed)` before `super.dispose()` so `_onDidClose` is still live for `_raceClose()` listeners, and so intentional client disposal wins over transports that emit `onClose` during disposal.
 
 ## Changelog
+
+- **2026-05-04** — 939d3f227c — reconciliation: documented SemVer handshake/incompatible remote status from `e1a89568eb2` and reverse filesystem permission gating / `resourceRequest` negotiation from `c30ed7c4a51`.
 
 - **2026-05-01** — b2e6267136 — reconciliation: no body changes. `8dbb8606e2c2` tightened client-requested session URI preservation, which this doc already covered in the session-creation URI ownership section.
 - **2026-04-30** - `928bc0340d` - documented that remote `createSession(config.session)` must honor the client-chosen AHP URI and only generate a new URI when no session was requested.

@@ -47,6 +47,8 @@ For the **`skill` tool**, Agent Host intentionally diverges from EH CLI parity. 
 
 ## Changelog
 
+- **2026-05-04** — 939d3f227c — reconciliation: no body changes. `23589831dad` (`ChatSkill.disableModelInvocation`) and `ca5a6a94aca` (logging cleanup) are extension-host implementation details; Copilot Agent Host commits in the range (`fd6d37812b4`, `6bdca786907`, `8309b22051c`, `96e4e9e8c81`) are covered by provider/tool-display/session-provider docs and do not change the parity-gap framing here.
+
 - **2026-05-01** — b2e6267136 — reconciliation: no body changes. The CLI logging/model/remote/runtime-pty commits (`675ef9f09b96`, `53964c4e856f`, `32db9092a586`, `17c5c32122f7`) are implementation parity details, while the Agent Host Copilot restore/shell changes are covered in the provider and shells docs.
 - **2026-04-29** — 2c0d520761 — noted that archive/unarchive worktree cleanup is now mirrored (see [copilot-agent-provider § Archive lifecycle](./copilot-agent-provider.md#archive-lifecycle-worktree-cleanup)); narrowed the worktree-lifecycle debt entry to just the auto-commit/checkpoint half. PR [#313393](https://github.com/microsoft/vscode/pull/313393).
 - **2026-04-26** — `b86149ad81` — updated "Parity gaps" to note that Agent Host now produces git-driven per-session file diffs for the "Branch changes" view (PR [#312632](https://github.com/microsoft/vscode/pull/312632)); clarified this is not the same as auto-commit/checkpoint — changes remain as working-tree files.

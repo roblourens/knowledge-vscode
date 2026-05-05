@@ -55,6 +55,8 @@ Push back on protocol or API shapes that put a concept at the wrong layer, mirro
 
 ## Changelog
 
+- **2026-05-04** — 939d3f227c — reconciliation: no principle changes. Protocol SemVer negotiation (`e1a89568eb2`), explicit filesystem permission negotiation (`c30ed7c4a51`), eager provisional session creation (`8309b22051c`), and mobile/remote UI polish all apply existing principles: fail explicitly for contract mismatches, keep resource truth at the owning side, and adapt VS Code UI without distorting AHP.
+
 - **2026-05-01** — b2e6267136 — reconciliation: no principle changes. The broad Agent Host changes since `5407371c47` are concrete applications of the existing principles: keep protocol/session truth in AHP state, use Copilot/Claude/CLI behavior as evidence rather than protocol ownership, and keep VS Code UI conventions narrow and documented.
 - **2026-04-24** — `5407371c47` — reconciliation: no doc changes. The session-settings and host-level configuration cluster (`779b23b6196`, `1453f5b4e9b`, `2289e091159`), the file moves under `extensions/copilot/.../chatSessions/copilotcli/` (`d90a8a752f0`), and the Copilot-CLI mission-control / refactor commits (`e2796aaef91`, `392ff04cf78`) are good concrete instances of the existing principles ("put truth at the layer that owns it", terminology for the extension-host Copilot CLI) but don't change them. Account-policy gating (`f67b2976016`) is a workbench-side feature that doesn't touch agent-host design.
 - **2026-04-23** — f32a933746 — initial design principles distilled from the knowledge-base design interview; added terminology for Agent Host, extension-host Copilot CLI, and the original VS Code agent

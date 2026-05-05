@@ -35,5 +35,7 @@ For bash/zsh, command lines written via `executeCommandWithShellIntegration` and
 
 ## Changelog
 
+- **2026-05-04** — 939d3f227c — reconciliation: no body changes. `e1a89568eb2` only updated the real-SDK test harness to the new protocol handshake shape; managed shell behavior, `skipPermission`, and history suppression are unchanged.
+
 - **2026-05-01** — b2e6267136 — reconciliation: documented independent terminal allocation for concurrent primary shell calls after `cfa5454b64c5`; `b9acc7f21912` only changed terminal-tool instructions, not shell-tool architecture.
 - **2026-04-24** — 4b6403a3ab — split managed shell behavior, permission asymmetry, and history suppression out of the Copilot provider overview

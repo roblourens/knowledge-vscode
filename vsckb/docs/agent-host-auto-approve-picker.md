@@ -1,16 +1,16 @@
 # Agent Host Auto-Approve Picker
 
-_Covers: src/vs/sessions/contrib/chat/browser/agentHost/agentHostPermissionPickerDelegate.ts, src/vs/sessions/contrib/chat/browser/agentHost/agentHostPermissionPickerActionItem.ts, src/vs/sessions/contrib/chat/browser/agentHost/agentHostSessionConfigPicker.ts, src/vs/sessions/contrib/copilotChatSessions/browser/permissionPicker.ts, src/vs/workbench/contrib/chat/browser/widget/input/permissionPickerActionItem.ts_
+_Covers: src/vs/sessions/contrib/chat/browser/agentHost/agentHostPermissionPickerDelegate.ts, src/vs/sessions/contrib/chat/browser/agentHost/agentHostPermissionPickerActionItem.ts, src/vs/sessions/contrib/chat/browser/agentHost/agentHostSessionConfigPicker.ts, src/vs/sessions/contrib/copilotChatSessions/browser/permissionPicker.ts, src/vs/sessions/contrib/copilotChatSessions/browser/mobilePermissionPicker.ts, src/vs/workbench/contrib/chat/browser/widget/input/permissionPickerActionItem.ts_
 
 The auto-approve permission picker is the dropdown that lets a user pick `Default` / `Bypass Approvals` / `Autopilot` for a chat session. For agent-host sessions the level lives in AHP session-config under the well-known `autoApprove` property name. The adjacent Agent Host mode picker handles the separate well-known `mode` property (`interactive` / plan-style modes) with its own UI. This doc covers how the `autoApprove` wire-level value plugs into the **two existing picker widgets** depending on where it renders, how the mode picker avoids the generic per-property fallback, and how non-conforming agents fall back to the generic per-property picker.
 
 ## The two-widget split (and why we keep both)
 
-There are two picker widgets in the tree, each scoped to one rendering context. They are intentionally separate — fully unifying them would force one of the two contexts to inherit styling/behavior that doesn't fit it.
+There are two picker contexts in the tree, each scoped to one rendering surface. They are intentionally separate — fully unifying them would force one of the two contexts to inherit styling/behavior that doesn't fit it. The new-chat context now uses a mobile-aware wrapper on web, but it is still the sessions-layer picker shape driven by the same delegate.
 
 | Widget | Location | Rendered in | Owner |
 |---|---|---|---|
-| `PermissionPicker` | `src/vs/sessions/contrib/copilotChatSessions/browser/permissionPicker.ts` | The Agents app's **new-chat page** (`Menus.NewSessionControl`) | Sessions layer |
+| `PermissionPicker` / `MobilePermissionPicker` | `src/vs/sessions/contrib/copilotChatSessions/browser/permissionPicker.ts`, `mobilePermissionPicker.ts` | The Agents app's **new-chat page** (`Menus.NewSessionControl`) | Sessions layer |
 | `PermissionPickerActionItem` | `src/vs/workbench/contrib/chat/browser/widget/input/permissionPickerActionItem.ts` | The running **chat input toolbar** (`MenuId.ChatInputSecondary`) — both VS Code chat and the Agents app's running session | Workbench layer |
 
 Both widgets accept delegate interfaces that are **structurally compatible for the shared permission-level fields** (defined separately in each layer with the matching field names `currentPermissionLevel`, `setPermissionLevel`, optional `isApplicable`). That means a single `AgentHostPermissionPickerDelegate` can drive both — which is what we do for agent-host sessions. The workbench `PermissionPickerActionItem` also has optional extension-contributed permission callbacks (`getExtensionPermissions` / `setExtensionPermission`) used by other chat providers; the agent-host delegate intentionally does not implement those because its contract is the well-known AHP `autoApprove` value.
@@ -29,7 +29,7 @@ interface IPermissionPickerDelegate {
 }
 ```
 
-- **`currentPermissionLevel`** — observable the widget reads from to render its label and check state. Optional on the sessions-layer interface (so the Copilot-CLI delegate can opt out and let the picker manage its own level via configuration defaults).
+- **`currentPermissionLevel`** — observable the widget reads from to render its label and check state. Optional on the sessions-layer interface (so the Copilot-CLI delegate can opt out and let the picker manage its own level via configuration defaults). `MobilePermissionPicker` uses the same delegate; only its popup presentation changes.
 - **`isApplicable`** — observable the widget uses to hide itself when the picker shouldn't apply. Only on the sessions-layer interface; the workbench widget gets the same effect by toggling `this.element.style.display` from a subclass `autorun` (see below).
 - **`setPermissionLevel(level)`** — write-back. Best-effort; failures are swallowed.
 
@@ -58,7 +58,7 @@ The property name itself is `SessionConfigKey.AutoApprove` (`'autoApprove'`); th
 
 `AgentHostSessionConfigPickerContribution` (in `agentHostSessionConfigPicker.ts`) registers two factories on `IActionViewItemService`:
 
-- **`Menus.NewSessionControl` → `PermissionPicker`** with an `AgentHostPermissionPickerDelegate`. The picker renders into the new-chat slot and uses the delegate's `isApplicable` observable to hide itself reactively when the active session isn't agent-host or has a non-conforming schema.
+- **`Menus.NewSessionControl` → `MobilePermissionPicker`** with an `AgentHostPermissionPickerDelegate`. On phone-layout web it opens a bottom sheet; on wider viewports it falls through to the sessions-layer desktop picker behavior. The picker renders into the new-chat slot and uses the delegate's `isApplicable` observable to hide itself reactively when the active session isn't agent-host or has a non-conforming schema.
 - **`MenuId.ChatInputSecondary` → `AgentHostPermissionPickerActionItem`** (a thin subclass of `PermissionPickerActionItem`). The subclass owns its own delegate and calls `this.refresh()` from an `autorun` over `delegate.currentPermissionLevel` (the base class renders pull-style on demand). It also adds an `autorun` in `render()` that toggles `this.element.style.display` based on `delegate.isApplicable` — same reactive-hide pattern, different mechanism because the workbench widget doesn't expose the slot directly.
 
 The generic per-property loop in `AgentHostSessionConfigPicker._renderConfigPickers` skips `autoApprove` only when its schema matches `isWellKnownAutoApproveSchema`. Otherwise it includes it, so non-conforming agents get a usable picker.
@@ -107,6 +107,8 @@ The tests use a fake provider and exercise the delegate in isolation. The widget
 - **gotcha** (2026-04-20, agentHostPermissionPickerActionItem.ts:render + permissionPicker.ts:render) — `IActionViewItemService` factories run once per render, so any "should this picker be visible right now?" check that depends on dynamic state (active session, schema shape) **must** be wired through an observable + `autorun` that toggles `style.display`. Don't move the check into the factory body; the active session can change while the view item is alive.
 
 ## Changelog
+
+- **2026-05-04** — 939d3f227c — reconciliation: updated the new-chat picker wording after `2fc10e36d28` introduced the mobile-aware `MobilePermissionPicker`; no body change needed for sandbox/network-option picker polish (`e7c6e7ebea2`) because the delegate/schema architecture is unchanged.
 
 - **2026-05-01** — b2e6267136 — reconciliation: documented the dedicated well-known `mode` picker and generic-picker auto-approve filtering after `75ec86b07f24`; no structural changes needed for the picker polish / policy-level commits because the existing delegate and schema sections still describe the architecture.
 - **2026-04-24** — `5407371c47` — reconciliation: well-known config keys moved to `src/vs/platform/agentHost/common/sessionConfigKeys.ts` (`SessionConfigKey.AutoApprove`, `KNOWN_AUTO_APPROVE_VALUES`) as the platform-side source of truth; the delegate's own `AUTO_APPROVE_PROPERTY` constant is gone (commit `1453f5b4e9b`). Noted that `SessionConfigPropertySchema` widened beyond string-enum (now `string|number|boolean|array|object` with `items`/`properties`/`required`) and that the recognition predicate still narrows to string-enum on purpose. Centralized agent-host schema descriptors now live in `agentHostSchema.ts` and are composed by `copilotAgent.resolveSessionConfig`.

@@ -22,7 +22,6 @@ src/vs/platform/agentHost/common/state/
 ├── sessionState.ts           ← root / session / terminal state shapes
 ├── sessionActions.ts         ← action types dispatched by clients, applied by server
 ├── sessionReducers.ts        ← reducers, used server-side AND client-side (optimistic)
-├── sessionCapabilities.ts    ← capability flags for feature-detection
 ├── agentSubscription.ts      ← AgentSubscriptionManager — the client read model
 └── sessionTransport.ts       ← transport abstractions (MessagePort, WebSocket, ...)
 ```
@@ -69,9 +68,17 @@ The `seq` drives **replay-based reconnection**: a client that drops and reattach
 
 Protocol-generated types do **not** carry an `I` prefix. The shapes generated under `state/protocol/` use plain names (`RootState`, `SessionState`, `ActionEnvelope`, `StateAction`, `FileEdit`, `ModelSelection`, …); the `I`-prefixed names from earlier docs no longer exist. Code outside `state/protocol/` may still wrap or re-export these under VS Code-style names, but the wire contract is the bare shape.
 
-## Capabilities and versioning
+## Version negotiation
 
-`sessionCapabilities.ts` lists capability flags. When a client must feature-detect server support, prefer adding a capability over silently changing behavior. This is what keeps older clients compatible with newer servers (and vice versa).
+Handshake is SemVer-based. The client sends `InitializeParams.protocolVersions: string[]` ordered from most preferred to least preferred; the server selects one and returns it as `InitializeResult.protocolVersion`. The generated `state/protocol/version/registry.ts` owns `PROTOCOL_VERSION` plus exhaustive introduced-in maps for actions and notifications.
+
+If no offered version is supported, the server throws `UnsupportedProtocolVersion` (-32005) with `UnsupportedProtocolVersionErrorData.supportedVersions` when available. Remote VS Code clients translate that into a sticky `RemoteAgentHostConnectionStatus.incompatible` state so the Agents app can show a warning rather than treating it like an ordinary network disconnect.
+
+## Capabilities
+
+When a client must feature-detect server support, prefer adding an explicit generated protocol feature/capability over silently changing behavior. This is what keeps older clients compatible with newer servers (and vice versa) once the protocol stabilizes.
+
+The legacy local `sessionCapabilities.ts` helper was removed when generated SemVer negotiation landed. New feature gates should be added to the protocol source/registry in the sibling repo and regenerated here, not reintroduced as a VS Code-only numeric capability table.
 
 ## Important types
 
@@ -85,8 +92,10 @@ Protocol-generated types do **not** carry an `I` prefix. The shapes generated un
 - `ActionEnvelope` — server-applied action plus server sequence and optional client origin.
 - `AgentSession.provider` / `id` / `uri` — helpers for canonical backend session URIs.
 - `InitializeParams.locale` — BCP 47 locale the client passes during `initialize`, so the server can localize confirmation labels and other server-emitted strings.
+- `InitializeParams.protocolVersions` / `InitializeResult.protocolVersion` — SemVer negotiation for the connection. Unsupported combinations fail with `UnsupportedProtocolVersion` (-32005) rather than a partial initialize.
 - Session config values are typed `Record<string, unknown>` (widened from `Record<string, string>`); `SessionConfigChanged` carries an optional `replace?: boolean` to distinguish merge vs full replacement.
 - `SessionState._meta?: Record<string, unknown>` — generic well-known-keyed metadata slot, dispatched by `SessionMetaChanged` and applied by `setSessionMeta` server-side. Used today for the `git` slot (`SESSION_META_GIT_KEY`, with `ISessionGitState` shape and `readSessionGitState` / `withSessionGitState` helpers in `sessionState.ts`) so server-computed git state can ride along with normal session-state subscriptions instead of needing a bespoke command. Add new well-known keys here rather than expanding the typed `SessionState` surface when a field is conceptually optional, server-computed, and well-known by string key.
+- `resourceRequest` / `PermissionDenied` — bidirectional permission negotiation for resource access. A failed resource command may throw `PermissionDenied` (-32009) with `PermissionDeniedErrorData.request`; the caller can then issue `resourceRequest` with that payload and retry if granted.
 
 ## Where to edit
 
@@ -101,7 +110,8 @@ Protocol-generated types do **not** carry an `I` prefix. The shapes generated un
 - **Don't bypass `AgentSubscriptionManager`** to read state from the server directly in client code. The subscription is the read model.
 - **The list API returns summaries, not full state.** A field that should appear in lists belongs on `SessionSummary` / `AgentSessionMetadata`, not on `SessionState`. Pushing back on upstream protocol changes that put list fields on the wrong type is part of working in this layer.
 - **Keep agent-specific knowledge out of state types.** Tool calls expose generic display fields (`displayName`, `invocationMessage`, `pastTenseMessage`, `toolKind`); they never carry raw agent tool names. If you need new rendering behavior, add a new `toolKind` value (a well-known convention — see [agent-host-topology](./agent-host-topology.md#the-two-sanctioned-exceptions-well-known-conventions)), not a tool-name check.
-- **Capability flags, not silent behavior changes.** When a client must feature-detect server support, add a flag to `sessionCapabilities.ts`. Silent behavior changes break older clients against newer servers and vice versa.
+- **Generated feature gates, not silent behavior changes.** When a client must feature-detect server support, add the gate to the protocol source/registry and regenerate VS Code's mirror. Silent behavior changes break older clients against newer servers and vice versa.
+- **Resource permissions are negotiated explicitly.** Filesystem-like RPCs must not silently fall through to local access. If a side lacks access, throw `PermissionDenied` with a `resourceRequest` payload where possible; the caller asks for access and retries only after the receiver grants it.
 - **Authentication errors are explicit, not empty responses.** When an agent declares `protectedResources` with `required: true` (the default), commands invoked on it before authentication MUST throw `ProtocolError(AHP_AUTH_REQUIRED, ...)` (-32007). Returning an empty result instead — empty session list, empty model list, etc. — is a silent lie that violates the AHP contract and breaks any consumer that caches the first response. The principle the protocol commits to: a response of "I don't know yet" is never indistinguishable from "I know, and the answer is empty." See `copilot-agent-provider.md` for the concrete violation that motivated capturing this rule, and `agent-host-sessions-providers.md` for how the renderer-side `authenticationPending` autorun retries cleanly off the throw.
 
 ## Related
@@ -114,6 +124,8 @@ Protocol-generated types do **not** carry an `I` prefix. The shapes generated un
 - **gotcha** (2026-04-20, AHP authentication contract — `protectedResources.required: true`) — agents whose `protectedResources` declare `required: true` (default) MUST throw `AHP_AUTH_REQUIRED` (-32007) for any command issued before authentication, NOT return empty results. The provider-side temptation is to return `[]` from `listSessions` / model list etc. when no token; that silently breaks one-shot caches in the consumer and causes hard-to-trace UI bugs (sidebar shows nothing forever until something else forces a refresh). See `changes/2026-04-20-fix-initial-session-list-display/` and the concrete rule in `copilot-agent-provider.md`.
 
 ## Changelog
+
+- **2026-05-04** — 939d3f227c — reconciliation: documented SemVer `initialize.protocolVersions` negotiation and `UnsupportedProtocolVersion` (-32005) from `e1a89568eb2`; documented bidirectional `resourceRequest` and `PermissionDenied` (-32009) resource-access negotiation from `c30ed7c4a51`; no body changes needed for subagent URI helpers (`fd6d37812b4`) or eager provisional session internals (`8309b22051c`) because those are service/provider-layer behavior rather than new protocol state shapes.
 
 - **2026-05-01** — b2e6267136 — reconciliation: added the observable adapter note after `b9ef6afd4e5a` introduced `observableFromSubscription`; no body changes needed for `SessionState._meta.git` (`1fa1b7af5c19`) because the existing `_meta` section already captured that well-known slot.
 - **2026-04-25** — `8e9b24cedf` — documented the `SessionState._meta` well-known-keyed slot and the first well-known key `git` (`SESSION_META_GIT_KEY`, `ISessionGitState`, `readSessionGitState` / `withSessionGitState` in `sessionState.ts`), dispatched by `SessionMetaChanged` and applied via `setSessionMeta`. See [agent-host-sessions-providers](./agent-host-sessions-providers.md#surfacing-session-_metagit-to-workspacerepositories0) for how the agents-app changes view consumes it (PR [#312543](https://github.com/microsoft/vscode/pull/312543)).

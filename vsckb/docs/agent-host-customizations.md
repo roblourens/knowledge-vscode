@@ -63,6 +63,8 @@ If you need decorations to survive reload for AH sessions, the pragmatic fix is 
 
 ## Changelog
 
+- **2026-05-04** — 939d3f227c — reconciliation: no body changes. `c30ed7c4a51` added implicit read grants for outgoing customization refs so existing remote plugin sync remains friction-free under filesystem permission gating, and `e1a89568eb2` only touched remote contribution connection-status plumbing.
+
 - **2026-05-01** — b2e6267136 — reconciliation: documented remote host plugin management via `RemoteAgentPluginController` after `e6b9ae7ff17a`; `8dbb8606e2c2` only reinforced the existing final-resource URI contract from the session-handler doc.
 - **2026-04-29** — `fa1adf3685` — added "Built-in skills (`BUILTIN_STORAGE`)" section; updated local-AH table row to include built-in skills; added gotcha for `BUILTIN_STORAGE` throw vs empty-return in `PromptsServiceImpl`. PR [#313277](https://github.com/microsoft/vscode/pull/313277).
 - **2026-04-28** — `258af94280` — initial entry. Captures the local vs remote split, the SKILL-folder convention (frontmatter for `name`/`description`, SKILL.md URI for `item.uri`, skip unreadable SKILL.md entries), the `supportsPromptAttachments: true` capability flag on both AH chat session contributions, and the decoration-revival asymmetry between locally-persisted and AH-restored chat requests.

@@ -1,6 +1,6 @@
 # Agent Host Topology and Protocol Philosophy
 
-_Covers: src/vs/platform/agentHost/, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostChatContribution.ts, src/vs/sessions/contrib/remoteAgentHost/, src/vs/sessions/contrib/sessions/browser/views/sessionsList.ts, src/vs/sessions/contrib/chat/browser/scopedWorkspacePicker.ts_
+_Covers: src/vs/platform/agentHost/, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostChatContribution.ts, src/vs/sessions/contrib/remoteAgentHost/, src/vs/sessions/contrib/sessions/browser/views/sessionsList.ts, src/vs/sessions/contrib/chat/browser/webWorkspacePicker.ts_
 
 This is the **orientation doc**. It answers four questions that come up at the start of every agent-host task:
 
@@ -176,7 +176,7 @@ VS Code (the IDE) gets configuration A only. The Agents app gets B and any numbe
 
 When the Agents app runs in web with remote agent hosts, the active host is also a piece of app chrome, not protocol state. `AgentHostFilterService` (`src/vs/sessions/contrib/remoteAgentHost/browser/agentHostFilterService.ts`) watches registered remote `IAgentHostSessionsProvider`s, tracks their connection statuses, persists the selected provider id, and exposes reconnect/disconnect commands. `HostFilterActionViewItem` renders that state as the titlebar host dropdown.
 
-The selected provider id scopes Agents-app surfaces that need a single host context: `sessionsList.ts` filters the sessions list to the selected provider, and `scopedWorkspacePicker.ts` filters workspace choices to the same provider. This is deliberately above `IAgentConnection`: the protocol still sees independent remote hosts, while the app decides which host the user is currently looking at.
+The selected provider id scopes Agents-app surfaces that need a single host context: `sessionsList.ts` filters the sessions list to the selected provider, and `webWorkspacePicker.ts` filters workspace choices to the same provider (with a phone-layout bottom-sheet variant on web). This is deliberately above `IAgentConnection`: the protocol still sees independent remote hosts, while the app decides which host the user is currently looking at.
 
 ### The shared seam: `IAgentConnection` and `AgentHostSessionHandler`
 
@@ -300,6 +300,8 @@ The agent host often needs to call back into the renderer to access client-side 
 
 **Key implication:** if you add another client-side resource that the local agent host needs to read (a new scheme, a new virtual filesystem), you must wire it through `AgentHostClientResourceChannel` for the local utility-process path — NOT by bundling the data to disk or skipping the virtual bundle. The remote AH path just works; only local AH needs the explicit reverse-channel.
 
+Reverse filesystem RPCs from a **remote** Agent Host are also permissioned before they touch the client's `IFileService`. `RemoteAgentHostProtocolClient` checks `IAgentHostPermissionService` for `resourceRead`, `resourceList`, `resourceWrite`, `resourceDelete`, and `resourceMove`; denied operations return typed `PermissionDenied` (-32009) with `PermissionDeniedErrorData.request`, so the host can send `resourceRequest` and retry after approval. The prompt is surfaced by `AgentHostPermissionUiContribution` above the chat input with Deny / Allow / Always Allow actions. Always-Allow grants persist in `chat.agentHost.localFilePermissions`; implicit read grants are registered for customization URIs the client sends to the host so plugin sync does not prompt.
+
 
 
 Auth is split across four layers, and each layer is ignorant of the others:
@@ -340,6 +342,8 @@ A short list of the values that drive design decisions in the agent host. When i
 - **gotcha** (2026-04-22, *RelayTransport.dispose) — relay-transport `dispose()` implementations are responsible for telling the shared-process side to close the underlying connection. `TunnelRelayTransport.dispose()` and `TunnelConnectionTransport.dispose()` both do this; `SSHRelayTransport.dispose()` historically did NOT (it only removed IPC listeners), which is why removing an SSH-backed remote leaked the tunnel until the SSH renderer started passing its own `transportDisposable` that calls `_mainService.disconnect(connectionId)`. If you add a new relay transport, make sure its `dispose()` either closes the shared-process connection itself or that the renderer that owns it passes a `transportDisposable` that does.
 
 ## Changelog
+
+- **2026-05-04** — 939d3f227c — reconciliation: updated remote host scoping after `2fc10e36d28` renamed `scopedWorkspacePicker.ts` to `webWorkspacePicker.ts` and added mobile bottom-sheet behavior; documented reverse filesystem permission gating from `c30ed7c4a51`; no principle/topology change for protocol-version negotiation (`e1a89568eb2`) beyond the remote incompatibility state covered by narrower docs.
 
 - **2026-05-01** — `4c1428f072` — added gotcha: local agent host starters must forward `--user-data-dir` (and `--logsPath`) to the spawned child, because the child resolves its own `userDataPath` from `parseArgs(process.argv)` inside `agentHostMain.ts` and there is no Electron-level inheritance for VS Code's environment service. PR [#313827](https://github.com/microsoft/vscode/pull/313827).
 - **2026-04-29** — `fa1adf3685` — added "Reverse RPC: remote AH vs local AH" section explaining why `AgentHostClientResourceChannel` exists for local AH (one-way MessagePort IPC vs bidirectional AHP WebSocket). Added matching gotcha. PR [#313277](https://github.com/microsoft/vscode/pull/313277).
