@@ -113,7 +113,7 @@ Changelogs are newest-first. Reconcile normally writes a fresh baseline for `ori
 
 Do **not** ask the user before bumping baselines for no-op reconciliations — it's the default behavior. The new SHA becomes the new baseline for next time.
 
-### 6. Commit the knowledge branch
+### 6. Commit, merge, and push the reconciliation
 
 Use a commit message like `reconcile: <YYYY-MM-DD> against origin/main @ <short SHA>`:
 
@@ -123,7 +123,14 @@ git -C "$KNOWLEDGE_REPO" add -A
 git -C "$KNOWLEDGE_REPO" commit -m "reconcile: $(date +%Y-%m-%d) against origin/main @ $SHA"
 ```
 
-Do not merge to `main` or push `main` from `reconcile`. Publishing happens through `finalize`, which will create the `changes/$SESSION_SLUG/summary.md` entry, merge `knowledge/$SESSION_SLUG` to `main`, and push `main`.
+Reconcile is a documentation-maintenance workflow, so finish it in this skill instead of deferring publication to `finalize`:
+
+1. Confirm the knowledge worktree is clean after the reconcile commit.
+2. Check out knowledge `main` and make sure it is current with `origin/main`.
+3. Merge `knowledge/$SESSION_SLUG` into `main` with a normal merge commit.
+4. Push knowledge `main` to `origin`.
+
+Use `git push -u origin main` when pushing so upstream tracking is explicit. Do not create a PR unless the user asked for one. `finalize` remains the workflow for completed exploration / plan / implementation sessions that need `changes/$SESSION_SLUG/summary.md`; routine reconcile sessions do not wait for it.
 
 ### 7. Report
 
@@ -133,4 +140,4 @@ Once committed, summarize:
 - **Presumed current:** count of docs with no changes since baseline. (List them only if the user asks.)
 - **Debt & gotchas changes:** list any `debt:` removals proposed and any `gotcha:` entries flagged as potentially stale, with the doc and the reason — the user confirms before they're removed (a follow-up commit).
 - **Needs human attention:** docs flagged for substantial invalidation in step 5.
-- **Next publish step:** tell the user to run `finalize` with `SESSION_SLUG` when they are ready to merge and push the reconciled knowledge.
+- **Published:** report that knowledge `main` was merged and pushed, including the reconcile branch name and the resulting main commit.
