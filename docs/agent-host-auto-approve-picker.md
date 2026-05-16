@@ -1,8 +1,8 @@
 # Agent Host Auto-Approve Picker
 
-_Covers: src/vs/sessions/contrib/chat/browser/agentHost/agentHostPermissionPickerDelegate.ts, src/vs/sessions/contrib/chat/browser/agentHost/agentHostPermissionPickerActionItem.ts, src/vs/sessions/contrib/chat/browser/agentHost/agentHostSessionConfigPicker.ts, src/vs/sessions/contrib/copilotChatSessions/browser/permissionPicker.ts, src/vs/sessions/contrib/copilotChatSessions/browser/mobilePermissionPicker.ts, src/vs/workbench/contrib/chat/browser/widget/input/permissionPickerActionItem.ts_
+_Covers: src/vs/sessions/contrib/providers/agentHost/browser/agentHostPermissionPickerDelegate.ts, src/vs/sessions/contrib/providers/agentHost/browser/agentHostPermissionPickerActionItem.ts, src/vs/sessions/contrib/providers/agentHost/browser/agentHostSessionConfigPicker.ts, src/vs/sessions/contrib/providers/agentHost/browser/agentHostModePicker.ts, src/vs/sessions/contrib/providers/agentHost/browser/agentHostClaudePermissionModePicker.ts, src/vs/sessions/contrib/providers/copilotChatSessions/browser/permissionPicker.ts, src/vs/sessions/contrib/providers/copilotChatSessions/browser/mobilePermissionPicker.ts, src/vs/workbench/contrib/chat/browser/widget/input/permissionPickerActionItem.ts_
 
-The auto-approve permission picker is the dropdown that lets a user pick `Default` / `Bypass Approvals` / `Autopilot` for a chat session. For agent-host sessions the level lives in AHP session-config under the well-known `autoApprove` property name. The adjacent Agent Host mode picker handles the separate well-known `mode` property (`interactive` / plan-style modes) with its own UI. This doc covers how the `autoApprove` wire-level value plugs into the **two existing picker widgets** depending on where it renders, how the mode picker avoids the generic per-property fallback, and how non-conforming agents fall back to the generic per-property picker.
+The auto-approve permission picker is the dropdown that lets a user pick `Default` / `Bypass Approvals` / `Autopilot` for a chat session. For agent-host sessions the level lives in AHP session-config under the well-known `autoApprove` property name. The adjacent Agent Host mode picker handles the separate well-known `mode` property (`interactive` / plan-style modes) with its own UI, while Claude Agent Host sessions expose a distinct well-known `permissionMode` enum. This doc covers how those picker surfaces split across new-session and running-session UI, how dedicated pickers avoid or intentionally reuse the generic per-property fallback, and how non-conforming agents still get generic session-config controls.
 
 ## The two-widget split (and why we keep both)
 
@@ -59,11 +59,15 @@ The property name itself is `SessionConfigKey.AutoApprove` (`'autoApprove'`); th
 `AgentHostSessionConfigPickerContribution` (in `agentHostSessionConfigPicker.ts`) registers two factories on `IActionViewItemService`:
 
 - **`Menus.NewSessionControl` → `MobilePermissionPicker`** with an `AgentHostPermissionPickerDelegate`. On phone-layout web it opens a bottom sheet; on wider viewports it falls through to the sessions-layer desktop picker behavior. The picker renders into the new-chat slot and uses the delegate's `isApplicable` observable to hide itself reactively when the active session isn't agent-host or has a non-conforming schema.
-- **`MenuId.ChatInputSecondary` → `AgentHostPermissionPickerActionItem`** (a thin subclass of `PermissionPickerActionItem`). The subclass owns its own delegate and calls `this.refresh()` from an `autorun` over `delegate.currentPermissionLevel` (the base class renders pull-style on demand). It also adds an `autorun` in `render()` that toggles `this.element.style.display` based on `delegate.isApplicable` — same reactive-hide pattern, different mechanism because the workbench widget doesn't expose the slot directly.
+- **`MenuId.ChatInputSecondary` → `AgentHostPermissionPickerActionItem`** (a thin subclass of `PermissionPickerActionItem`). The subclass owns its own delegate and calls `this.refresh()` from an `autorun` over `delegate.currentPermissionLevel` (the base class renders pull-style on demand). It also adds an `autorun` in `render()` that toggles the outer render `container.style.display` based on `delegate.isApplicable`. Hiding only `this.element` leaves the enclosing `.chat-input-picker-item` action item alive, so its toolbar min-width still reserves an empty gap.
 
 The generic per-property loop in `AgentHostSessionConfigPicker._renderConfigPickers` skips `autoApprove` only when its schema matches `isWellKnownAutoApproveSchema`. Otherwise it includes it, so non-conforming agents get a usable picker.
 
 `AgentHostSessionConfigPicker` also recognizes a well-known `mode` property through `isWellKnownModeSchema(schema)`: a string enum containing at least `interactive`. When that predicate matches, the generic per-property loop skips `mode` and the dedicated `AgentHostModePicker` owns the UI. This keeps execution mode (interactive / planning-style behavior) visually and semantically separate from the permission level (`default` / `autoApprove` / `autopilot`).
+
+Claude Agent Host sessions add a related but intentionally different case: well-known `permissionMode` is recognized by `isWellKnownClaudePermissionModeSchema(schema)`, and **running** sessions get a dedicated `AgentHostClaudePermissionModePicker` in `MenuId.ChatInputSecondary`. **New** sessions do not get a dedicated left-lane action in `Menus.NewSessionControl`; they deliberately fall through to the existing generic config chip in `Menus.NewSessionRepositoryConfig`, which keeps the permission chip next to repository/session config controls on the right side of the new-chat row. Moving the new-session Claude picker into `NewSessionControl` makes it look like a control-lane action and produces the wrong toolbar grouping.
+
+`AgentHostModePicker` and `AgentHostClaudePermissionModePicker` share the generic `AgentHostSessionEnumPicker` mechanics: resolve the active schema, render action-list rows, write selected enum values back through the provider, and report picker telemetry for real enum choices. The shared enum picker is generic by design. It exposes footer extension hooks (`_getFooterActionItems`, `_handleFooterActionItem`) but does not know about permissions, docs URLs, or Claude-specific labels. The Claude subclass contributes the separator + `Learn more about permissions` row and opens the Claude permission-mode docs from its own handler; footer rows are consumed before config writes or telemetry for enum choices.
 
 The generic picker path still applies auto-approve policy filtering for conforming values that render outside the unified widget: `chat.autopilot.enabled` hides `autopilot`, and a policy value of `chat.tools.global.autoApprove = false` disables both `autoApprove` and `autopilot` choices. Elevated choices show one warning per VS Code session; confirming `autopilot` also counts as accepting the lower `autoApprove` warning.
 
@@ -76,14 +80,14 @@ Both widgets need to *react* to changes in the active session — the active ses
 
 ## Tests
 
-`src/vs/sessions/contrib/chat/test/browser/agentHost/agentHostPermissionPickerDelegate.test.ts` covers:
+`src/vs/sessions/contrib/providers/agentHost/test/browser/agentHost/agentHostPermissionPickerDelegate.test.ts` covers:
 
 - `isWellKnownAutoApproveSchema` — exact match, missing `default`, extra enum values, wrong type.
 - `currentPermissionLevel` — derives from active session's `autoApprove` value, falls back to `Default` when missing/unrecognized, updates on provider config-change.
 - `setPermissionLevel` — routes to `provider.setSessionConfigValue`, no-op when no active session.
 - `isApplicable` — reacts to active-session changes and to schema-shape changes.
 
-The tests use a fake provider and exercise the delegate in isolation. The widgets themselves don't have direct unit coverage — both are exercised through the existing chat input integration tests.
+The tests use a fake provider and exercise the delegate in isolation. The common widgets still rely on broader integration coverage, but `src/vs/sessions/contrib/providers/agentHost/test/browser/agentHostClaudePermissionModePicker.test.ts` now covers the Claude enum-picker footer path directly: selecting `Learn more about permissions` opens the docs URI and does not write a session-config value.
 
 ## Where to edit
 
@@ -105,8 +109,12 @@ The tests use a fake provider and exercise the delegate in isolation. The widget
 - **gotcha** (2026-04-20, agentHostPermissionPickerActionItem.ts:constructor) — this subclass forwards every constructor parameter of `PermissionPickerActionItem` to `super()`. When the workbench base class gains a new injected service (it gained `IStorageService` once already), the subclass **must** be updated in lockstep — TypeScript will catch the missing argument, but only after the base class change merges. If you touch `PermissionPickerActionItem`'s constructor, search for subclasses before pushing.
 - **gotcha** (2026-04-20, agentHostPermissionPickerDelegate.ts:isWellKnownAutoApproveSchema) — recognition is by enum *shape*, not by property name alone. An agent that advertises `autoApprove` with extra enum values (or a different `type`) deliberately falls back to the generic per-property picker. Don't relax the predicate to "only check that `default` is present" without weighing what new enum values would mean for the unified picker UI (which has no rendering path for unknown levels).
 - **gotcha** (2026-04-20, agentHostPermissionPickerActionItem.ts:render + permissionPicker.ts:render) — `IActionViewItemService` factories run once per render, so any "should this picker be visible right now?" check that depends on dynamic state (active session, schema shape) **must** be wired through an observable + `autorun` that toggles `style.display`. Don't move the check into the factory body; the active session can change while the view item is alive.
+- **gotcha** (2026-05-15, agentHostSessionConfigPicker.ts:Claude permissionMode registration) — the dedicated Claude `permissionMode` picker is for running sessions in `ChatInputSecondary`; new sessions intentionally keep `permissionMode` in the generic `NewSessionRepositoryConfig` chip lane. Do not add a dedicated `Menus.NewSessionControl` Claude picker unless the new-chat toolbar layout is deliberately being redesigned.
+- **gotcha** (2026-05-15, agentHostPermissionPickerActionItem.ts:render) — an inapplicable running-session picker must hide its outer render container, not only the inner label element. `.chat-input-picker-item` carries toolbar min-width/layout participation, so inner-only hiding leaves an empty gap beside visible controls.
 
 ## Changelog
+
+- **2026-05-15** — bb32c5e7de — documented Claude Agent Host `permissionMode` picker placement, generic enum footer-hook ownership, the toolbar-wrapper visibility gotcha, and focused footer-path test coverage.
 
 - **2026-05-04** — 939d3f227c — reconciliation: updated the new-chat picker wording after `2fc10e36d28` introduced the mobile-aware `MobilePermissionPicker`; no body change needed for sandbox/network-option picker polish (`e7c6e7ebea2`) because the delegate/schema architecture is unchanged.
 
