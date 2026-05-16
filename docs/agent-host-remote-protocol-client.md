@@ -93,7 +93,7 @@ The 2026-04-21 audit intentionally fixed only request lifecycle and structured e
 
 ## Changelog
 
-- **2026-05-15** — 12443ea83d — reconciliation: documented soft reconnect/replay gating from `ca28b2066f2`, the reconnect-hang fix in `f91a396d242`, active AHP ping liveness from `90db24b194c`, and transport JSONL logging from `e85a8295788`; the older reconnect debt is now resolved in prose.
+- **2026-05-15** — 12443ea83d — reconciliation: documented soft reconnect/replay gating from `ca28b2066f2`, the reconnect-hang fix in `f91a396d242`, active AHP ping liveness from `90db24b194c`, and transport JSONL logging from `e85a8295788`; the older reconnect debt entry remains below as a cleanup candidate for explicit confirmation.
 
 - **2026-05-04** — 939d3f227c — reconciliation: documented SemVer handshake/incompatible remote status from `e1a89568eb2` and reverse filesystem permission gating / `resourceRequest` negotiation from `c30ed7c4a51`.
 
