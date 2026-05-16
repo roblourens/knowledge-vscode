@@ -7,11 +7,26 @@ description: "Strongly prefer this skill for ANY coding or implementation reques
 
 Implement a change to the VS Code agent host, augmented by prior knowledge from the knowledge repo. This skill is deliberately lightweight — it's the normal agent coding workflow with knowledge context loaded up front.
 
-## Knowledge repo location
+## Knowledge checkout bootstrap
 
-This `SKILL.md` lives at `<KNOWLEDGE_REPO>/skills/implement/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory two levels up from this file: the `vsckb` plugin root. All knowledge reads and writes happen against that path directly.
+The installed `vsckb` plugin is only the skill runner. The mutable knowledge base lives in a workspace-local checkout of `git@github.com:roblourens/knowledge-vscode.git`, with `docs/`, `plan/`, `changes/`, and `vsckb/` at the checkout root.
 
-Re-derive `VSCODE_REPO` and `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
+Before reading or writing knowledge, resolve paths from the current workspace, not from this installed `SKILL.md`:
+
+- `VSCODE_REPO` is `git rev-parse --show-toplevel` for the workspace where the user is working.
+- `VSCODE_BRANCH` is `git -C "$VSCODE_REPO" branch --show-current`.
+- `KNOWLEDGE_REMOTE` is `git@github.com:roblourens/knowledge-vscode.git`.
+- `KNOWLEDGE_REPO` is normally `$VSCODE_REPO/.knowledge-vscode`, a git submodule checkout of `KNOWLEDGE_REMOTE`.
+
+If `$VSCODE_REPO` itself is the knowledge repo (it has `docs/`, `plan/`, `changes/`, and `vsckb/`, and its `origin` URL matches `KNOWLEDGE_REMOTE` or the equivalent HTTPS URL), use `$VSCODE_REPO` as `KNOWLEDGE_REPO` and do not create a nested submodule.
+
+Otherwise, before reading or writing:
+
+1. Resolve `PLUGIN_ROOT` as the directory two levels up from this installed `SKILL.md`.
+2. Run `"$PLUGIN_ROOT/scripts/init-knowledge-checkout.sh" "$PWD"`.
+3. Use the `VSCODE_REPO`, `KNOWLEDGE_REPO`, and `KNOWLEDGE_REMOTE` values printed by the script for the rest of the skill.
+
+The helper creates or reuses `.knowledge-vscode`, runs `git submodule add -f` when needed, unstages `.gitmodules` and `.knowledge-vscode` after creation, and fetches the knowledge remote. The parent workspace is expected to git-ignore `.knowledge-vscode` and `.gitmodules` from its root; the helper does not edit ignore or exclude files.
 
 ## Write boundary in the knowledge repo
 
@@ -25,7 +40,11 @@ If `plan` ran earlier in this conversation, reuse the `SESSION_SLUG` it created.
 
 - If the user is resuming work and tells you the slug, use it.
 - If exactly one folder under `$KNOWLEDGE_REPO/plan/` looks like this session's, use it.
-- Otherwise generate one: `SESSION_SLUG = YYYY-MM-DD-<short-description>`. If that path already exists, append `-2`, `-3`, etc. until free. `mkdir -p "$KNOWLEDGE_REPO/plan/$SESSION_SLUG"`.
+- Otherwise generate one: `SESSION_SLUG = YYYY-MM-DD-<short-description>`. If that path already exists, append `-2`, `-3`, etc. until free.
+
+After determining `SESSION_SLUG`, create or reuse the session branch in the knowledge checkout before writing: `knowledge/$SESSION_SLUG`. If the branch exists locally, check it out. If `origin/knowledge/$SESSION_SLUG` exists, check it out with tracking. Otherwise create it from `origin/main`.
+
+Then create the session marker folder if needed: `mkdir -p "$KNOWLEDGE_REPO/plan/$SESSION_SLUG"`.
 
 The empty folder is enough to mark the session for `finalize`. You don't need to write `plan.md`/`tasks.md` if there's no plan.
 
@@ -64,7 +83,7 @@ If during implementation you discover that a knowledge doc is wrong or incomplet
 
 ### 4. Stop at "implementation complete"
 
-This skill does not commit, push, or finalize. When the user is satisfied with the implementation, they (or the agent at their direction) run `finalize` to roll learnings back into the knowledge repo and commit them.
+This skill does not merge to `main`, push `main`, or finalize. It may commit the knowledge session branch if useful, but uncommitted session edits are also fine. When the user is satisfied with the implementation, they (or the agent at their direction) run `finalize` to roll learnings back into the knowledge repo, merge the session branch to `main`, and push.
 
 ## Privacy: don't leak the knowledge repo into source
 

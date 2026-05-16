@@ -24,11 +24,26 @@ These two files are presented as a diff. The user reads the diff to understand w
 - Only lines that actually represent a design change should differ between the two files.
 - If an unchanged interface or type is not important to understanding the plan, remove it from both files to keep the diff focused.
 
-## Knowledge repo location
+## Knowledge checkout bootstrap
 
-This `SKILL.md` lives at `<KNOWLEDGE_REPO>/skills/interface-planner/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory two levels up from this file: the `vsckb` plugin root. All knowledge reads and writes happen against that path directly.
+The installed `vsckb` plugin is only the skill runner. The mutable knowledge base lives in a workspace-local checkout of `git@github.com:roblourens/knowledge-vscode.git`, with `docs/`, `plan/`, `changes/`, and `vsckb/` at the checkout root.
 
-Re-derive `VSCODE_REPO` and `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
+Before reading or writing knowledge, resolve paths from the current workspace, not from this installed `SKILL.md`:
+
+- `VSCODE_REPO` is `git rev-parse --show-toplevel` for the workspace where the user is working.
+- `VSCODE_BRANCH` is `git -C "$VSCODE_REPO" branch --show-current`.
+- `KNOWLEDGE_REMOTE` is `git@github.com:roblourens/knowledge-vscode.git`.
+- `KNOWLEDGE_REPO` is normally `$VSCODE_REPO/.knowledge-vscode`, a git submodule checkout of `KNOWLEDGE_REMOTE`.
+
+If `$VSCODE_REPO` itself is the knowledge repo (it has `docs/`, `plan/`, `changes/`, and `vsckb/`, and its `origin` URL matches `KNOWLEDGE_REMOTE` or the equivalent HTTPS URL), use `$VSCODE_REPO` as `KNOWLEDGE_REPO` and do not create a nested submodule.
+
+Otherwise, before reading or writing:
+
+1. Resolve `PLUGIN_ROOT` as the directory two levels up from this installed `SKILL.md`.
+2. Run `"$PLUGIN_ROOT/scripts/init-knowledge-checkout.sh" "$PWD"`.
+3. Use the `VSCODE_REPO`, `KNOWLEDGE_REPO`, and `KNOWLEDGE_REMOTE` values printed by the script for the rest of the skill.
+
+The helper creates or reuses `.knowledge-vscode`, runs `git submodule add -f` when needed, unstages `.gitmodules` and `.knowledge-vscode` after creation, and fetches the knowledge remote. The parent workspace is expected to git-ignore `.knowledge-vscode` and `.gitmodules` from its root; the helper does not edit ignore or exclude files.
 
 ## Output Location
 
@@ -40,7 +55,7 @@ Example:
 $KNOWLEDGE_REPO/plan/2026-03-28-refactor-chat-service/
 ```
 
-Create the session folder at the start of Phase 2, before writing any files:
+Create or checkout the knowledge branch `knowledge/$SESSION_SLUG`, then create the session folder at the start of Phase 2, before writing any files:
 
 ```bash
 mkdir -p "$KNOWLEDGE_REPO/plan/$SESSION_SLUG"

@@ -9,17 +9,34 @@ Detect and **fix** drift between the knowledge docs and the current state of the
 
 The trick: don't re-read every doc against every code reference. Use the VS Code Git history since each doc's baseline SHA — if nothing relevant has changed in the area a doc covers, the doc is presumed current and is skipped.
 
-## Knowledge repo location
+## Knowledge checkout bootstrap
 
-This `SKILL.md` lives at `<KNOWLEDGE_REPO>/skills/reconcile/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory two levels up from this file: the `vsckb` plugin root. All knowledge reads and writes happen against that path directly.
+The installed `vsckb` plugin is only the skill runner. The mutable knowledge base lives in a workspace-local checkout of `git@github.com:roblourens/knowledge-vscode.git`, with `docs/`, `plan/`, `changes/`, and `vsckb/` at the checkout root.
 
-Re-derive `VSCODE_REPO` from `git rev-parse` against the workspace root.
+Before reading or writing knowledge, resolve paths from the current workspace, not from this installed `SKILL.md`:
+
+- `VSCODE_REPO` is `git rev-parse --show-toplevel` for the workspace where the user is working.
+- `VSCODE_BRANCH` is `git -C "$VSCODE_REPO" branch --show-current`.
+- `KNOWLEDGE_REMOTE` is `git@github.com:roblourens/knowledge-vscode.git`.
+- `KNOWLEDGE_REPO` is normally `$VSCODE_REPO/.knowledge-vscode`, a git submodule checkout of `KNOWLEDGE_REMOTE`.
+
+If `$VSCODE_REPO` itself is the knowledge repo (it has `docs/`, `plan/`, `changes/`, and `vsckb/`, and its `origin` URL matches `KNOWLEDGE_REMOTE` or the equivalent HTTPS URL), use `$VSCODE_REPO` as `KNOWLEDGE_REPO` and do not create a nested submodule.
+
+Otherwise, before reading or writing:
+
+1. Resolve `PLUGIN_ROOT` as the directory two levels up from this installed `SKILL.md`.
+2. Run `"$PLUGIN_ROOT/scripts/init-knowledge-checkout.sh" "$PWD"`.
+3. Use the `VSCODE_REPO`, `KNOWLEDGE_REPO`, and `KNOWLEDGE_REMOTE` values printed by the script for the rest of the skill.
+
+The helper creates or reuses `.knowledge-vscode`, runs `git submodule add -f` when needed, unstages `.gitmodules` and `.knowledge-vscode` after creation, and fetches the knowledge remote. The parent workspace is expected to git-ignore `.knowledge-vscode` and `.gitmodules` from its root; the helper does not edit ignore or exclude files.
+
+Use `SESSION_SLUG = YYYY-MM-DD-reconcile` unless the user gives a more specific slug. Create or reuse the knowledge branch `knowledge/$SESSION_SLUG`: if the branch exists locally, check it out; if `origin/knowledge/$SESSION_SLUG` exists, check it out with tracking; otherwise create it from `origin/main`.
 
 Reconciliation is normally run from the main VS Code checkout, against `origin/main`. If running from a worktree on a feature branch, ask the user whether to reconcile against `origin/main` (recommended) or `HEAD`.
 
 Make sure the VS Code repo is up to date with the remote: `git -C "$VSCODE_REPO" fetch origin --quiet`.
 
-Make sure the knowledge repo is up to date too: `git -C "$KNOWLEDGE_REPO" pull --rebase --autostash origin main`. Stop if it fails.
+Make sure the knowledge branch is up to date with `origin/main`: `git -C "$KNOWLEDGE_REPO" rebase --autostash origin/main`. Stop if it fails.
 
 ## Workflow
 
@@ -96,7 +113,7 @@ Changelogs are newest-first. Reconcile normally writes a fresh baseline for `ori
 
 Do **not** ask the user before bumping baselines for no-op reconciliations — it's the default behavior. The new SHA becomes the new baseline for next time.
 
-### 6. Commit and push
+### 6. Commit the knowledge branch
 
 Use a commit message like `reconcile: <YYYY-MM-DD> against origin/main @ <short SHA>`:
 
@@ -104,10 +121,9 @@ Use a commit message like `reconcile: <YYYY-MM-DD> against origin/main @ <short 
 SHA="$(git -C "$VSCODE_REPO" rev-parse --short=10 origin/main)"
 git -C "$KNOWLEDGE_REPO" add -A
 git -C "$KNOWLEDGE_REPO" commit -m "reconcile: $(date +%Y-%m-%d) against origin/main @ $SHA"
-git -C "$KNOWLEDGE_REPO" push origin main
 ```
 
-If the push is rejected, re-run `git pull --rebase --autostash origin main` and retry once. If it still fails, stop and surface to the user.
+Do not merge to `main` or push `main` from `reconcile`. Publishing happens through `finalize`, which will create the `changes/$SESSION_SLUG/summary.md` entry, merge `knowledge/$SESSION_SLUG` to `main`, and push `main`.
 
 ### 7. Report
 
@@ -117,3 +133,4 @@ Once committed, summarize:
 - **Presumed current:** count of docs with no changes since baseline. (List them only if the user asks.)
 - **Debt & gotchas changes:** list any `debt:` removals proposed and any `gotcha:` entries flagged as potentially stale, with the doc and the reason — the user confirms before they're removed (a follow-up commit).
 - **Needs human attention:** docs flagged for substantial invalidation in step 5.
+- **Next publish step:** tell the user to run `finalize` with `SESSION_SLUG` when they are ready to merge and push the reconciled knowledge.

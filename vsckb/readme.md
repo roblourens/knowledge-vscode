@@ -4,9 +4,9 @@
 
 This system maintains a personal knowledge base about the VS Code agent host subsystem, stored in a separate Git repo and accessed by AI coding agents via a set of namespaced skills. It is designed for one developer working with AI coding agents across multiple concurrent sessions on a large, multi-contributor codebase.
 
-This repo contains the knowledge plugin. The actual knowledge base lives inside the plugin root at `vsckb/`, next to the skills that read and write it. It is not checked into the VS Code repo and lives independently. Each skill resolves the knowledge root from its own `SKILL.md` location — there's no setting, no symlink, no per-session worktree.
+This repo contains both the knowledge plugin and the knowledge base. The globally installed `vsckb` plugin is only the skill runner. When a skill runs in a VS Code workspace, it resolves or creates a workspace-local `.knowledge-vscode/` submodule pointing at `git@github.com:roblourens/knowledge-vscode.git`, then reads and writes the knowledge base at that checkout root.
 
-The system is packaged as the **`vsckb` VS Code agent plugin** (under `vsckb/`, in the same Team Kit-style agent plugin format used by `vscode-team-kit`). The plugin contains both the knowledge artifacts (`index.md`, `docs/`, `changes/`, `plan/`) and the skills (`explore`, `plan`, `implement`, `finalize`, `reconcile`, `interface-planner`, `help`) which manage the lifecycle of planning, implementing, documenting, and validating. Installing the plugin registers the skills under the `vsckb` namespace in VS Code (e.g. `vsckb:plan`, `vsckb:implement`).
+The system is packaged as the **`vsckb` VS Code agent plugin** (under `vsckb/`, in the same Team Kit-style agent plugin format used by `vscode-team-kit`). The repository root contains the knowledge artifacts (`index.md`, `docs/`, `changes/`, `plan/`) and the plugin folder contains the skills (`explore`, `plan`, `implement`, `finalize`, `reconcile`, `interface-planner`, `help`) which manage the lifecycle of planning, implementing, documenting, and validating. Installing the plugin registers the skills under the `vsckb` namespace in VS Code (e.g. `vsckb:plan`, `vsckb:implement`).
 
 ---
 
@@ -17,26 +17,26 @@ The knowledge repo is this repo. Its structure:
 ```
 knowledge-vscode/
 ├── marketplace.json
+├── index.md
+├── readme.md
+├── docs/
+│   ├── agent-host-protocol.md
+│   ├── agent-host-session-handler.md
+│   └── ...
+├── changes/
+│   ├── 2026-04-15-session-reconnect/
+│   │   └── summary.md
+│   └── ...
+├── plan/
+│   ├── 2026-04-15-session-reconnect/
+│   │   ├── plan.md
+│   │   └── tasks.md
+│   └── ...
 └── vsckb/
-│   ├── .plugin/
-│   │   └── plugin.json
-  ├── index.md
-  ├── readme.md
-  ├── docs/
-  │   ├── agent-host-protocol.md
-  │   ├── agent-host-session-handler.md
-  │   └── ...
-  ├── changes/
-  │   ├── 2026-04-15-session-reconnect/
-  │   │   └── summary.md
-  │   └── ...
-  ├── plan/
-  │   ├── 2026-04-15-session-reconnect/
-  │   │   ├── plan.md
-  │   │   └── tasks.md
-  │   └── ...
-  └── skills/
-    └── ...
+    ├── .plugin/
+    │   └── plugin.json
+    └── skills/
+        └── ...
 ```
 
 ### `index.md`
@@ -96,16 +96,16 @@ Ephemeral planning artifacts for the current session. Each session gets its own 
 
 These skills ship as part of the `vsckb` VS Code agent plugin in this repo, in the same Team Kit-style format used by `vscode-team-kit`. The repo-level `marketplace.json` points to `./vsckb/` as the plugin root. Installing the plugin registers the skills under the `vsckb` namespace, so they show up grouped in VS Code as `vsckb:plan`, `vsckb:implement`, etc.
 
-Each skill resolves the knowledge root from its own `SKILL.md` location — `KNOWLEDGE_REPO` is the directory two levels up from `vsckb/skills/<skill>/SKILL.md`, i.e. `vsckb/` itself. There's no init step, no setting, no symlink, no worktree.
+Each skill resolves the knowledge root from the workspace where the user is working. If the workspace is already this repo, `KNOWLEDGE_REPO` is the workspace root. Otherwise, `KNOWLEDGE_REPO` is `.knowledge-vscode/`, a submodule checkout of `git@github.com:roblourens/knowledge-vscode.git`. The shared init helper lives at `vsckb/scripts/init-knowledge-checkout.sh`; skills run it before reading or writing knowledge. The parent workspace is expected to git-ignore `.knowledge-vscode` and `.gitmodules` from its root, so the helper does not edit ignore or exclude files.
 
 ### Write boundaries
 
 The whole concurrency story is enforced by two simple rules:
 
 1. **`plan` and `implement` (and `interface-planner`) only ever write to `plan/<SESSION_SLUG>/`.** Never to `docs/`, `changes/`, `index.md`, or another session's plan folder.
-2. **`finalize` and `reconcile` are the only skills that write outside `plan/<slug>/`** — and they're also the only skills that commit and push. They `git pull --rebase` first, then commit and push directly to `main`. If a concurrent session pushed something they conflict with, the rebase fails and the user resolves it.
+2. **`finalize` and `reconcile` are the only skills that write outside `plan/<slug>/`**. `reconcile` writes and may commit on a knowledge session branch. `finalize` is the only skill that merges that branch to `main` and pushes `main`.
 
-That's it. Concurrent sessions are safe because they touch disjoint slugs, and the commit step is serialized through `origin/main`.
+That's it. Concurrent sessions are safe because they touch disjoint slugs and branches, and publishing is serialized through `finalize` and `origin/main`.
 
 ### `explore`
 
@@ -146,20 +146,20 @@ This skill is deliberately lightweight. It's the normal agent coding workflow, a
 
 ### `finalize`
 
-**Purpose:** Capture what was learned in this session, then commit and push it directly to `main`.
+**Purpose:** Capture what was learned in this session, then commit the knowledge session branch, merge it to `main`, and push `main`.
 
 **Behavior:**
 
-1. Verify the working tree has no other in-flight edits that don't belong to this session.
-2. `git fetch origin main` and `git pull --rebase --autostash origin main`. If the rebase fails (concurrent finalize touched the same docs), stop and surface the conflict.
+1. Verify the knowledge branch has no other in-flight edits that don't belong to this session.
+2. `git fetch origin main` and `git rebase --autostash origin/main` on `knowledge/<slug>`. If the rebase fails (concurrent finalize touched the same docs), stop and surface the conflict.
 3. Run a retrospective on the session — what was misunderstood, what was a dead end, what should have been documented but wasn't — and map each finding to a `gotcha:`/`debt:` entry, doc body update, new doc, or `changes/` summary.
 4. Update affected files in `docs/`: revise descriptions, update cross-references, update `## Debt & gotchas`, insert a changelog entry at the top with today's date and the current HEAD SHA of the VS Code working branch.
 5. Create new docs if needed; update `index.md` to list them.
 6. Remove the session's `plan/$SESSION_SLUG/` subfolder.
 7. Write `changes/$SESSION_SLUG/summary.md` (with the mandatory **What went wrong or was misunderstood** section).
-8. `git add -A && git commit -m "<title from summary>" && git push origin main`. If the push is rejected, re-run `pull --rebase` and retry once.
+8. `git add -A && git commit -m "<title from summary>"`, checkout `main`, `git pull --rebase origin main`, fast-forward merge `knowledge/<slug>`, then `git push origin main`. If `main` advanced, rebase the session branch and retry once.
 
-`finalize` is the only place that commits work for a session. There's no separate review-and-publish step — once you invoke `finalize`, the result lands on `main`. To amend, edit the knowledge repo directly and make a follow-up commit.
+`finalize` is the only place that publishes work for a session. Earlier skills may leave uncommitted edits or commits on `knowledge/<slug>`, but `main` only moves during `finalize`. To amend, edit the knowledge repo directly and make a follow-up commit.
 
 ### `reconcile`
 
@@ -169,13 +169,13 @@ This skill is deliberately lightweight. It's the normal agent coding workflow, a
 
 **Behavior:**
 
-1. Pull-rebase the knowledge repo so updates land on top of any concurrent work.
+1. Create or reuse a `knowledge/<slug>` branch, then rebase it on `origin/main`.
 2. For each doc, read `Covers:` and the latest changelog entry to get a baseline SHA.
 3. Compute the set of VS Code commits between each doc's baseline SHA and `origin/main`.
 4. For docs with no overlap, bump the changelog SHA in place (no body changes) — the doc is presumed current. This is what makes the next reconcile cheap.
 5. For docs with overlap, drill in: read the changed code and commits, update the doc body, revisit `## Debt & gotchas`, insert a changelog entry at the top.
 6. Mechanical pass for any references to deleted/renamed/moved files or symbols, regardless of baseline.
-7. Commit and push the result directly to `main`.
+7. Commit the result on the knowledge branch. Run `finalize` when ready to merge and push it.
 
 ### `interface-planner`
 
@@ -193,13 +193,14 @@ A typical session:
 
 1. Open VS Code in the VS Code repo (or any worktree of it).
 2. Start a chat session and ask the agent to plan or implement.
-3. The agent uses `plan` for larger work (writes to `plan/<slug>/`), or jumps straight to `implement` for smaller changes.
-4. Do the work. Agent reads relevant docs as needed.
-5. Run `finalize` to capture what was learned, update the docs, write a `changes/` entry, and commit it directly to `main`.
+3. The first knowledge skill runs `vsckb/scripts/init-knowledge-checkout.sh` to create or reuse `.knowledge-vscode/` as a submodule. The parent workspace's root ignore config keeps `.knowledge-vscode` and `.gitmodules` out of normal commits.
+4. The agent uses `plan` for larger work (writes to `plan/<slug>/` on `knowledge/<slug>`), or jumps straight to `implement` for smaller changes.
+5. Do the work. Agent reads relevant docs as needed.
+6. Run `finalize` to capture what was learned, update the docs, write a `changes/` entry, merge the knowledge branch to `main`, and push.
 
 Periodically (e.g., weekly, or after a batch of teammates' PRs land):
 
-6. Run `reconcile` to update stale docs against the current VS Code codebase. This also commits and pushes.
+7. Run `reconcile` to update stale docs against the current VS Code codebase on a knowledge branch, then run `finalize` to publish it.
 
 ---
 
@@ -207,7 +208,7 @@ Periodically (e.g., weekly, or after a batch of teammates' PRs land):
 
 **Why a separate repo, not gitignored files in the VS Code repo:** Gitignored files aren't version-controlled. The knowledge base needs its own history, branching, and the ability to be shared later without touching the VS Code repo.
 
-**Why no init / worktree / symlink layer:** An earlier version of this system gave each session its own knowledge worktree on a session-named branch, exposed under `<vscode>/.knowledge/`, with a separate `land` skill that committed and merged the worktree back into `main`. That bought isolation between concurrent sessions but cost a complex init flow, broken-symlink failure modes, and an extra publish step. The simpler shape is: every session reads and writes the same checkout, but the *only* place plan/implement may write is `plan/<slug>/`, which is owned by exactly one session. `docs/` and `changes/` are only written by `finalize` and `reconcile`, both of which pull-rebase before committing. Conflicts are rare (knowledge changes infrequently) and obvious when they happen.
+**Why a workspace-local submodule instead of writing inside the installed plugin:** Globally installed skills should be stable and reusable across workspaces. The mutable knowledge state belongs with the workspace session that is using it, so each workspace gets `.knowledge-vscode/` as a submodule of this repo. The init helper centralizes the Git setup, relies on the parent workspace's root ignore config for `.knowledge-vscode` and `.gitmodules`, and unstages parent metadata after `git submodule add`, keeping the parent worktree clean while preserving a real Git checkout for the knowledge base.
 
 **Why mostly flat `docs/` instead of mirroring the VS Code repo's directory structure:** The VS Code repo is deep and complex. Mirroring it would create empty directories, hard-to-find files, and maintenance overhead, and it would also force each doc to live at one canonical location even though many docs cut across the tree. Flat files with descriptive names, declared `Covers:` paths, and cross-references in `index.md` are easier to browse and maintain.
 
@@ -217,6 +218,6 @@ Periodically (e.g., weekly, or after a batch of teammates' PRs land):
 
 **Why debt and gotchas live per-doc instead of in a standalone debt doc:** A standalone debt doc rots quickly because nothing forces you to revisit it when the related code changes, and it duplicates context that already lives in the doc. Per-doc entries are loaded automatically whenever an agent reads the doc, and `reconcile` can validate `debt:` entries against the code in the same pass that validates the rest of the doc. Cross-cutting items get a short pointer in `index.md`.
 
-**Why `finalize` commits straight to `main` instead of going through a review step:** The earlier two-step `finalize` + `land` flow added a manual checkpoint between writing the diff and publishing it. In practice the diff was almost always good, and the extra step mostly added latency. Committing straight to `main` keeps the loop tight; if a finalize is wrong, the user edits the repo and makes a follow-up commit.
+**Why `finalize` is the publish gate:** Planning and implementation can leave edits or commits on `knowledge/<slug>` so the session has durable state without moving published knowledge. `finalize` is the intentional checkpoint that writes the change summary, updates docs, merges the branch to `main`, and pushes. If a finalize is wrong, the user edits the repo directly and makes a follow-up commit.
 
 **Why changelog SHAs reference the working branch, not the merge commit:** Recording the merge-to-main SHA would require coming back to the knowledge repo after the PR merges, which adds friction and will be forgotten. The working branch SHA is good enough — it anchors the entry in time, gives drift detection a baseline to diff against, and can be correlated with a PR if needed.

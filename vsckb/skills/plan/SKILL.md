@@ -9,11 +9,26 @@ You are a PLANNING AGENT for changes to the VS Code agent host subsystem. You re
 
 This skill is informed by both the existing knowledge base **and** the VS Code source itself. Knowledge docs are a starting point, not a substitute for reading code.
 
-## Knowledge repo location
+## Knowledge checkout bootstrap
 
-This `SKILL.md` lives at `<KNOWLEDGE_REPO>/skills/plan/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory two levels up from this file: the `vsckb` plugin root. All knowledge reads and writes happen against that path directly.
+The installed `vsckb` plugin is only the skill runner. The mutable knowledge base lives in a workspace-local checkout of `git@github.com:roblourens/knowledge-vscode.git`, with `docs/`, `plan/`, `changes/`, and `vsckb/` at the checkout root.
 
-Re-derive `VSCODE_REPO` and `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
+Before reading or writing knowledge, resolve paths from the current workspace, not from this installed `SKILL.md`:
+
+- `VSCODE_REPO` is `git rev-parse --show-toplevel` for the workspace where the user is working.
+- `VSCODE_BRANCH` is `git -C "$VSCODE_REPO" branch --show-current`.
+- `KNOWLEDGE_REMOTE` is `git@github.com:roblourens/knowledge-vscode.git`.
+- `KNOWLEDGE_REPO` is normally `$VSCODE_REPO/.knowledge-vscode`, a git submodule checkout of `KNOWLEDGE_REMOTE`.
+
+If `$VSCODE_REPO` itself is the knowledge repo (it has `docs/`, `plan/`, `changes/`, and `vsckb/`, and its `origin` URL matches `KNOWLEDGE_REMOTE` or the equivalent HTTPS URL), use `$VSCODE_REPO` as `KNOWLEDGE_REPO` and do not create a nested submodule.
+
+Otherwise, before reading or writing:
+
+1. Resolve `PLUGIN_ROOT` as the directory two levels up from this installed `SKILL.md`.
+2. Run `"$PLUGIN_ROOT/scripts/init-knowledge-checkout.sh" "$PWD"`.
+3. Use the `VSCODE_REPO`, `KNOWLEDGE_REPO`, and `KNOWLEDGE_REMOTE` values printed by the script for the rest of the skill.
+
+The helper creates or reuses `.knowledge-vscode`, runs `git submodule add -f` when needed, unstages `.gitmodules` and `.knowledge-vscode` after creation, and fetches the knowledge remote. The parent workspace is expected to git-ignore `.knowledge-vscode` and `.gitmodules` from its root; the helper does not edit ignore or exclude files.
 
 ## Write boundary
 
@@ -58,7 +73,7 @@ Generate `SESSION_SLUG = YYYY-MM-DD-<short-description>` (3–5 words, kebab-cas
 
 If `$KNOWLEDGE_REPO/plan/$SESSION_SLUG/` already exists (another session may have used the name), append `-2`, `-3`, etc. until the path is free.
 
-Create the session directory: `mkdir -p "$KNOWLEDGE_REPO/plan/$SESSION_SLUG"`. Remember `SESSION_SLUG` for the rest of the conversation — `implement` and `finalize` will use it.
+After choosing the slug, create or checkout the knowledge branch `knowledge/$SESSION_SLUG`, then create the session directory: `mkdir -p "$KNOWLEDGE_REPO/plan/$SESSION_SLUG"`. Remember `SESSION_SLUG` for the rest of the conversation — `implement` and `finalize` will use it.
 
 ### 6. Write the plan
 
@@ -135,4 +150,4 @@ Keep iterating until explicit approval. Do not start implementation from this sk
 
 - **Never** edit files under `$VSCODE_REPO`. Planning only.
 - **Never** edit anything in `$KNOWLEDGE_REPO` outside `plan/$SESSION_SLUG/`. That includes `docs/`, `changes/`, `index.md`, and other sessions' plan folders.
-- **Never** commit. Commits happen at `finalize`.
+- You may commit the session branch if useful, but never merge to `main` or push `main`. The merge and push happen at `finalize`.

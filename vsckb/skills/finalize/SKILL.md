@@ -1,23 +1,38 @@
 ---
 name: finalize
-description: "Strongly prefer this skill after ANY completed VS Code Agent Host / agent host / AHP / Agent Host Protocol exploration, plan, or implementation when the user wants learnings captured, docs updated, or knowledge finalized. Use when the user says 'finalize knowledge', 'finalize the session', 'capture what we learned', or has finished Agent Host work and wants docs/changelog updated. Updates docs and changes/, cleans up the session's plan/ subfolder, then commits and pushes the result directly to main."
+description: "Strongly prefer this skill after ANY completed VS Code Agent Host / agent host / AHP / Agent Host Protocol exploration, plan, or implementation when the user wants learnings captured, docs updated, or knowledge finalized. Use when the user says 'finalize knowledge', 'finalize the session', 'capture what we learned', or has finished Agent Host work and wants docs/changelog updated. Updates docs and changes/, cleans up the session's plan/ subfolder, then commits the knowledge session branch, merges it to main, and pushes main."
 ---
 
 # Skill: finalize
 
-Capture what was learned in this session as updates to the knowledge repo, then commit and push them to `main`.
+Capture what was learned in this session as updates to the knowledge repo, then commit the knowledge session branch, merge it to `main`, and push `main`.
 
-This skill writes doc updates, a new `changes/` entry, removes the session's `plan/` subfolder, and commits the lot. It is the only skill in this plugin that writes outside `plan/<slug>/` or that commits.
+This skill writes doc updates, a new `changes/` entry, removes the session's `plan/` subfolder, and commits the lot. It is the only skill in this plugin that writes outside `plan/<slug>/` or merges and pushes `main`.
 
-## Knowledge repo location
+## Knowledge checkout bootstrap
 
-This `SKILL.md` lives at `<KNOWLEDGE_REPO>/skills/finalize/SKILL.md`. Resolve `KNOWLEDGE_REPO` as the directory two levels up from this file: the `vsckb` plugin root. All knowledge reads, writes, and git operations happen against that path directly.
+The installed `vsckb` plugin is only the skill runner. The mutable knowledge base lives in a workspace-local checkout of `git@github.com:roblourens/knowledge-vscode.git`, with `docs/`, `plan/`, `changes/`, and `vsckb/` at the checkout root.
 
-Re-derive `VSCODE_REPO` and `VSCODE_BRANCH` from `git rev-parse` against the workspace root.
+Before reading or writing knowledge, resolve paths from the current workspace, not from this installed `SKILL.md`:
+
+- `VSCODE_REPO` is `git rev-parse --show-toplevel` for the workspace where the user is working.
+- `VSCODE_BRANCH` is `git -C "$VSCODE_REPO" branch --show-current`.
+- `KNOWLEDGE_REMOTE` is `git@github.com:roblourens/knowledge-vscode.git`.
+- `KNOWLEDGE_REPO` is normally `$VSCODE_REPO/.knowledge-vscode`, a git submodule checkout of `KNOWLEDGE_REMOTE`.
+
+If `$VSCODE_REPO` itself is the knowledge repo (it has `docs/`, `plan/`, `changes/`, and `vsckb/`, and its `origin` URL matches `KNOWLEDGE_REMOTE` or the equivalent HTTPS URL), use `$VSCODE_REPO` as `KNOWLEDGE_REPO` and do not create a nested submodule.
+
+Otherwise, before reading or writing:
+
+1. Resolve `PLUGIN_ROOT` as the directory two levels up from this installed `SKILL.md`.
+2. Run `"$PLUGIN_ROOT/scripts/init-knowledge-checkout.sh" "$PWD"`.
+3. Use the `VSCODE_REPO`, `KNOWLEDGE_REPO`, and `KNOWLEDGE_REMOTE` values printed by the script for the rest of the skill.
+
+The helper creates or reuses `.knowledge-vscode`, runs `git submodule add -f` when needed, unstages `.gitmodules` and `.knowledge-vscode` after creation, and fetches the knowledge remote. The parent workspace is expected to git-ignore `.knowledge-vscode` and `.gitmodules` from its root; the helper does not edit ignore or exclude files.
 
 ## Pick the session slug
 
-`SESSION_SLUG` is the session's subfolder under `$KNOWLEDGE_REPO/plan/`. If `plan` or `implement` ran earlier in this conversation, reuse the slug they used. Otherwise:
+`SESSION_SLUG` is the session's subfolder under `$KNOWLEDGE_REPO/plan/`. If `plan`, `implement`, `interface-planner`, or `reconcile` ran earlier in this conversation, reuse the slug they used. Otherwise:
 
 - If exactly one folder under `plan/` looks like this session's work, use it.
 - If multiple folders are present (concurrent sessions in other VS Code windows), ask the user which slug belongs to this session — don't guess.
@@ -25,17 +40,19 @@ Re-derive `VSCODE_REPO` and `VSCODE_BRANCH` from `git rev-parse` against the wor
 
 ## Workflow
 
-### 1. Make sure the working tree is clean enough
+Before step 1, create or checkout the knowledge branch `knowledge/$SESSION_SLUG`: if the branch exists locally, check it out; if `origin/knowledge/$SESSION_SLUG` exists, check it out with tracking; otherwise create it from `origin/main`.
+
+### 1. Make sure the knowledge branch is clean enough
 
 Check `git -C "$KNOWLEDGE_REPO" status --porcelain`. If there are uncommitted edits that don't belong to this session (e.g. another in-flight finalize, hand edits the user is working on), stop and surface them — do not commit them along with this session's work.
 
 Exception: unrelated uncommitted `plan/<other-session>/` folders are common when another session is in progress. If the user confirms they are unrelated, you may ignore those folders and continue, but you must avoid `git add -A`; stage only this session's doc/change/plan cleanup files explicitly.
 
-### 2. Sync with origin
+### 2. Sync the session branch with origin
 
 ```sh
 git -C "$KNOWLEDGE_REPO" fetch origin main --quiet
-git -C "$KNOWLEDGE_REPO" pull --rebase --autostash origin main
+git -C "$KNOWLEDGE_REPO" rebase --autostash origin/main
 ```
 
 If the rebase fails (concurrent finalize from another session touched the same docs), stop and surface the conflict to the user. Don't attempt to auto-resolve prose conflicts.
@@ -170,7 +187,7 @@ If the session truly had no missteps, write `- (none — existing knowledge was 
 
 The **What went wrong** section is mandatory — even if short.
 
-### 8. Commit and push
+### 8. Commit, merge, and push
 
 Use the title from the `changes/$SESSION_SLUG/summary.md` first heading (without the leading `# `) as the commit subject:
 
@@ -178,12 +195,17 @@ Use the title from the `changes/$SESSION_SLUG/summary.md` first heading (without
 SUBJECT="$(awk '/^# /{sub(/^# /,""); print; exit}' "$KNOWLEDGE_REPO/changes/$SESSION_SLUG/summary.md")"
 git -C "$KNOWLEDGE_REPO" add -A
 git -C "$KNOWLEDGE_REPO" commit -m "$SUBJECT"
+git -C "$KNOWLEDGE_REPO" checkout main
+git -C "$KNOWLEDGE_REPO" pull --rebase origin main
+git -C "$KNOWLEDGE_REPO" merge --ff-only "knowledge/$SESSION_SLUG"
 git -C "$KNOWLEDGE_REPO" push origin main
 ```
 
 If step 1 identified unrelated plan folders that the user asked you to ignore, do not use `git add -A` here. Stage the specific files for this finalize (updated docs, `changes/$SESSION_SLUG/summary.md`, deleted `plan/$SESSION_SLUG/`, and any intentional skill updates) and verify `git diff --cached --name-status` does not include the unrelated plan folders before committing.
 
-If the push is rejected (someone else pushed between steps 2 and 8), re-run step 2's `pull --rebase` and retry the push once. If it still fails, stop and surface to the user.
+If `main` advanced between steps 2 and 8 and the fast-forward merge fails, checkout `knowledge/$SESSION_SLUG`, re-run step 2's rebase, then retry the checkout-main, pull, merge, and push sequence once. If it still fails, stop and surface to the user.
+
+Do not push the session branch unless the user explicitly asks. The durable published state is `main` on the knowledge remote.
 
 ### 9. Report
 
