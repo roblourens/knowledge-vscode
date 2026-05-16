@@ -1,20 +1,22 @@
 # Agent Host customization item providers
 
-_Covers: src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostLocalCustomizations.ts, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostChatContribution.ts, src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHostCustomizationHarness.ts, src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHost.contribution.ts_
+_Covers: src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostLocalCustomizations.ts, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentCustomizationItemProvider.ts, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostChatContribution.ts, src/vs/sessions/contrib/providers/remoteAgentHost/browser/remoteAgentHostCustomizationHarness.ts, src/vs/sessions/contrib/providers/remoteAgentHost/browser/remoteAgentHost.contribution.ts_
 
 The agent-host customization item providers turn an agent host's set of plugin/customization references into the per-file (skill / agent / instructions / prompt) entries that show up in the chat customization view, in the chat input editor's slash-command decorations, and in `resolvePromptSlashCommand` calls. They live alongside (but are distinct from) `AgentHostSessionHandler`'s in-protocol `customization` action forwarding — the handler sends customization *refs* over the wire, while these providers expand a ref into individual user-visible items by reading filesystems.
 
-There are two implementations, one per app:
+Display expansion now converges on `AgentCustomizationItemProvider`. Local Agent Host chat registrations instantiate it directly; the remote Sessions contribution wraps the same provider with remote-only remove actions. Local customization enumeration is still separate: `enumerateLocalCustomizationsForHarness` discovers files that should be synced to the host, while `AgentCustomizationItemProvider` expands host/session customization refs that are already present in AHP state.
 
-| Concern | Local AH (`LocalAgentHostCustomizationItemProvider`) | Remote AH (`RemoteAgentCustomizationItemProvider`) |
+The inputs still differ by origin:
+
+| Concern | Local synced input | Shared host/session ref expansion |
 |---|---|---|
-| File source | Local `IPromptsService` index (workspace + user + extensions) **+ built-in skills from `BUILTIN_STORAGE`** | Host-configured plugins from root config + session-synced plugins, walked as `agent-host://` URIs through `IFileService` per plugin folder |
-| Skill metadata | `IPromptsService.findAgentSkills(token)` (already parses + sanitizes + truncates frontmatter) | `IFileService.readFile(SKILL.md)` + `new PromptFileParser().parse(...)` on demand |
-| Item shape | Flat list of files | Parent plugin item + expanded children, with `groupKey` for host vs client-synced |
+| File source | Local `IPromptsService` index (workspace + user + extensions) **+ built-in skills from `BUILTIN_STORAGE`** | Host-configured plugins from root config + session-synced plugins, walked as direct synced-bundle URIs or `agent-host://` URIs through `IFileService` |
+| Skill metadata | `IPromptsService.findAgentSkills(token)` for local sync discovery | `IFileService.readFile(SKILL.md)` + `new PromptFileParser().parse(...)` while expanding a plugin/bundle |
+| Item shape | Refs bundled for `activeClient.customizations` | Parent plugin item + expanded children, with `groupKey` for remote-host vs remote-client/synced |
 | Change events | `IPromptsService.onDidChange*` | `IAgentConnection.rootState` + `SessionCustomizationsChanged` actions |
 | Caching | None — live query each call | `_expansionCache: ResourceMap<{nonce, children}>`, invalidated by nonce change |
 
-These look superficially similar but should **not** be unified — the data sources, lifecycles, change events, and item topology are genuinely different. The only piece that is duplicated and would be a reasonable extraction is the SKILL.md frontmatter helper (also independently reimplemented in `AgenticPromptsService.discoverBuiltinSkills`).
+These are intentionally adjacent but not interchangeable: local discovery decides what the client syncs, while the shared item provider renders refs the host exposes. The provider also understands synthetic synced bundles: it expands them in-place instead of wrapping them in `agent-host://`, because the bundle filesystem lives on the client. The only piece that is still a reasonable extraction is the SKILL.md frontmatter helper (also independently reimplemented in `AgenticPromptsService.discoverBuiltinSkills`).
 
 ## The skill-folder convention
 
@@ -55,13 +57,15 @@ If you need decorations to survive reload for AH sessions, the pragmatic fix is 
 
 ## Debt & gotchas
 
-- **gotcha** (2026-04-28, agentHostLocalCustomizations.ts:provideChatSessionCustomizations + remoteAgentHostCustomizationHarness.ts:_collectFromTypeDir) — for folder-style skills, `ICustomizationItem.uri` MUST be `<folder>/SKILL.md`, not the folder URI. Downstream `parseNew(item.uri)` is a file read; a directory URI silently breaks slash-command resolution and chat input decorations. The remote provider skips skills whose `SKILL.md` cannot be read; the local provider relies on `IPromptsService.findAgentSkills` to filter.
-- **gotcha** (2026-04-28, agentHostLocalCustomizations.ts + remoteAgentHostCustomizationHarness.ts) — for skill display name, NEVER use `basename(file.uri)` on a `SKILL.md` — it returns the literal string `"SKILL"`. Use the frontmatter `name` (via `findAgentSkills` for local, `PromptFileParser` for remote) and fall back to the parent folder name.
+- **gotcha** (2026-04-28, agentHostLocalCustomizations.ts + agentCustomizationItemProvider.ts:_collectFromTypeDir) — for folder-style skills, `ICustomizationItem.uri` MUST be `<folder>/SKILL.md`, not the folder URI. Downstream `parseNew(item.uri)` is a file read; a directory URI silently breaks slash-command resolution and chat input decorations. Provider-side expansion skips skills whose `SKILL.md` cannot be read; local sync discovery relies on `IPromptsService.findAgentSkills` to filter.
+- **gotcha** (2026-04-28, agentHostLocalCustomizations.ts + agentCustomizationItemProvider.ts) — for skill display name, NEVER use `basename(file.uri)` on a `SKILL.md` — it returns the literal string `"SKILL"`. Use the frontmatter `name` (via `findAgentSkills` for local discovery, `PromptFileParser` for provider expansion) and fall back to the parent folder name.
 - **gotcha** (2026-04-29, agentHostLocalCustomizations.ts:enumerateLocalCustomizationsForHarness) — `BUILTIN_STORAGE` is NOT a member of the `PromptsStorage` enum; it is a sentinel recognized only by `AgenticPromptsService`. The regular workbench `PromptsServiceImpl` throws for unknown storage values, not returns `[]`. Always wrap the `listPromptFilesForStorage(..., BUILTIN_STORAGE)` call in `try/catch` and treat any throw as empty. Tests for this function should model the throw, not a silent empty return.
-- **debt** (2026-04-28, multiple) — SKILL.md frontmatter parsing is now duplicated in three places: `IPromptsService.findAgentSkills`, `RemoteAgentCustomizationItemProvider._readSkillMetadata`, and `AgenticPromptsService.discoverBuiltinSkills`. A shared helper in `promptSyntax/` would consolidate them.
+- **debt** (2026-04-28, multiple) — SKILL.md frontmatter parsing is now duplicated in four places: `IPromptsService.findAgentSkills`, `AgentCustomizationItemProvider._readSkillMetadata`, `AgentHostSkillCompletionProvider._readSkillMetadata`, and `AgenticPromptsService.discoverBuiltinSkills`. A shared helper in `promptSyntax/` would consolidate them.
 - **debt** (2026-04-28, AH chat session restore path) — AH-restored chat requests don't re-parse for slash commands, so skill decorations don't survive reload. Re-running `ChatRequestParser.parseChatRequest` when hydrating AH user messages from AHP state would fix this.
 
 ## Changelog
+
+- **2026-05-15** — 12443ea83d — reconciliation: documented the shared `AgentCustomizationItemProvider`, synthetic synced-bundle expansion, and current remote provider paths after `fec57be8249`, `cb855bd361c`, and the Sessions provider move in `a3d955d72ad`.
 
 - **2026-05-04** — 939d3f227c — reconciliation: no body changes. `c30ed7c4a51` added implicit read grants for outgoing customization refs so existing remote plugin sync remains friction-free under filesystem permission gating, and `e1a89568eb2` only touched remote contribution connection-status plumbing.
 

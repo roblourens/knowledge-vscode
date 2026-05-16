@@ -12,6 +12,8 @@ For the broader local/remote topology, start with [agent-host-topology](./agent-
 
 If the host rejects the handshake with `UnsupportedProtocolVersion` (-32005), the error remains a structured `ProtocolError` with typed `UnsupportedProtocolVersionErrorData.supportedVersions`. The higher-level remote host services convert that through `RemoteAgentHostConnectionStatus.fromConnectError(...)` into an `incompatible` status. That status is intentionally sticky: WebSocket, SSH, and tunnel paths suppress automatic reconnect for protocol mismatches, but manual Reconnect clears the state and tries again.
 
+After a successful handshake the client keeps a stable `clientId`, remembers its last server sequence, and can soft-reconnect when its transport is factory-backed. Reconnect sends AHP `reconnect`, applies either replayed envelopes or server snapshots back through `AgentSubscriptionManager`, and drains wire messages that were queued while the transport was recovering. Passive SSH/tunnel transports without a replacement factory still surface close to the owning service, which decides whether to create a fresh client.
+
 ## Request lifecycle
 
 Outgoing JSON-RPC requests are correlated by numeric id in `_pendingRequests`. The client now makes the lifecycle rule explicit:
@@ -21,6 +23,7 @@ Outgoing JSON-RPC requests are correlated by numeric id in `_pendingRequests`. T
 - Client disposal rejects every pending request with a `ProtocolError` from `connectionDisposedError(address)`.
 - Requests started after close/dispose reject immediately and do not send on the transport.
 - Explicit client-transport `connect()` is raced against close/dispose before `initialize`; disposal during a never-resolving transport connect rejects promptly.
+- Requests issued while a soft reconnect is active wait behind the reconnect gate instead of sending on a dead transport. If a reconnect attempt fails, that gate rolls forward to the next attempt so newer requests do not slip through onto the old transport.
 
 `ProtocolError` preserves JSON-RPC `code`, `message`, and optional `data`. Prefer checking `code` over matching strings. The local synthetic close/dispose code is currently `-32000` because these failures happen client-side before a server-defined AHP error exists.
 
@@ -34,6 +37,12 @@ Remote hosts can ask the client to read/write/list/delete/move resources through
 - Outgoing `activeClient.customizations` refs get implicit read grants so synced customization/plugin files remain friction-free.
 
 The prompt UI lives outside this client in `AgentHostPermissionUiContribution`; the client only asks the permission service and reports typed protocol errors.
+
+## Active liveness and transport logs
+
+The watchdog now supervises idle links too. Every tick with no pending RPCs sends an application-level `ping`; if a request (including a ping) remains unanswered while no message has arrived for the watchdog window, the client treats the transport as dead and triggers the same reconnect/close path as an explicit socket loss. Servers that do not implement `ping` still produce an error response, which is enough to refresh read activity and prove the path is alive.
+
+Transport JSONL logging is wired around this client by the remote service when Agent Host AHP logging is enabled. Keep that logging at the transport/client boundary: it is for reconstructing request/response/reconnect chronology, not for feature-level business logging.
 
 ## Session creation URI ownership
 
@@ -69,9 +78,8 @@ Guard broader service interactions with `remoteAgentHostService.test.ts`. Transp
 
 ## Remaining debt candidates
 
-The 2026-04-21 audit intentionally fixed only request lifecycle and structured errors. These adjacent items remain open and are good follow-up tasks:
+The 2026-04-21 audit intentionally fixed only request lifecycle and structured errors. Soft reconnect landed later; these adjacent items remain open and are good follow-up tasks:
 
-- Implement real protocol reconnect in the remote client: stable client id across reconnects, remembered subscriptions, `reconnect` command with `lastSeenServerSeq`, replay/snapshot handling, and optimistic action reconciliation.
 - Add focused `WebSocketClientTransport` tests for error-then-close exactly-once behavior, malformed/non-object messages, send-after-close behavior, and dispose-triggered close behavior.
 - Align WebSocket, SSH relay, and tunnel relay close semantics so remote bugs do not depend on the transport path.
 - Revisit whether the local `-32000` close/dispose code should become a named shared client-side constant or a documented AHP-side code.
@@ -84,6 +92,8 @@ The 2026-04-21 audit intentionally fixed only request lifecycle and structured e
 - **gotcha** (2026-04-21, remoteAgentHostProtocolClient.ts:dispose) - disposal must call `_handleClose(disposed)` before `super.dispose()` so `_onDidClose` is still live for `_raceClose()` listeners, and so intentional client disposal wins over transports that emit `onClose` during disposal.
 
 ## Changelog
+
+- **2026-05-15** — 12443ea83d — reconciliation: documented soft reconnect/replay gating from `ca28b2066f2`, the reconnect-hang fix in `f91a396d242`, active AHP ping liveness from `90db24b194c`, and transport JSONL logging from `e85a8295788`; the older reconnect debt entry remains below as a cleanup candidate for explicit confirmation.
 
 - **2026-05-04** — 939d3f227c — reconciliation: documented SemVer handshake/incompatible remote status from `e1a89568eb2` and reverse filesystem permission gating / `resourceRequest` negotiation from `c30ed7c4a51`.
 

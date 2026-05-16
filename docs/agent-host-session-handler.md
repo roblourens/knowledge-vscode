@@ -21,6 +21,8 @@ For each chat session backed by an Agent Host, the handler:
 - **Coordinates subagents** that the session spawns.
 - **Retries on auth-required errors** by calling `authenticate` on the connection (using protected resources advertised in `IRootState`) and re-dispatching.
 - **Forwards customization refs** so the active client's customizations apply to the running session.
+- **Supplies chat-input completions** by asking the connection for generated AHP completion items, translating command/skill/attachment-backed items into the workbench completion model, and honoring trigger characters announced during initialize.
+- **Renders agent-originated input requests** from `SessionState.inputRequests`, including elicitation forms and URL-style affordances that providers translate into the generic AHP input-request state.
 
 ## What it does NOT own
 
@@ -45,7 +47,7 @@ interface IAgentHostSessionHandlerConfig {
 }
 ```
 
-Local wiring is in `agentHostChatContribution.ts` (`AgentHostContribution`); remote wiring is in `src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHost.contribution.ts` (`RemoteAgentHostContribution`). They differ only in how `sessionType`, `connectionAuthority`, and `connection` are derived.
+Local wiring is in `agentHostChatContribution.ts` (`AgentHostContribution`); remote wiring is in `src/vs/sessions/contrib/providers/remoteAgentHost/browser/remoteAgentHost.contribution.ts` (`RemoteAgentHostContribution`). They differ only in how `sessionType`, `connectionAuthority`, and `connection` are derived.
 
 Lifecycle controls that are local-only (restart, dev-mode startup) live on `IAgentHostService`, not on the handler. If the handler reaches for `IAgentHostService` instead of `IAgentConnection` for a behavior that should also work remotely, that's a bug.
 
@@ -90,6 +92,7 @@ Client tools are already generic: `_dispatchActiveClient` sends the active clien
 - **Disposables register at construction time.** Use `this._register(...)` for normal cleanup. The one deliberate exception in this file is `AgentHostChatSession.dispose()`, which fires `onWillDispose` before the registered disposables are torn down so `ContributedChatSessionData` can evict the session from chat-session caches before the emitter itself is disposed.
 - **Preserve the `IAgentConnection` abstraction.** Reach for `IAgentHostService` only when you need a local-lifecycle API (restart, etc.).
 - **Customization refs flow through the protocol.** Don't piggyback on workbench-side state to communicate customization changes to the server; use `ISessionActiveClient` and customization actions.
+- **A failed first subscription is recoverable.** `_createAndSubscribe` retries the Agent Host session subscription after transient subscription failure before treating the chat session as lost; keep that recovery path paired with transport reconnect behavior rather than converting it into a terminal render error.
 
 ## Remote file links in tool messages
 
@@ -168,6 +171,8 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 - **gotcha** (2026-04-21, agentHostSessionHandler.ts:AgentHostChatSession.dispose) — `onWillDispose` must fire before `super.dispose()`. Firing it through `this._register(toDisposable(...))` runs too late because registered disposables are already being disposed; listeners like `ContributedChatSessionData` then miss the chance to evict the session before later lookups and messages can route to stale state.
 
 ## Changelog
+
+- **2026-05-15** — 12443ea83d — reconciliation: documented chat-input completions/slash-command support (`394e46e44cb`, `1fbe0acb198`), input-request/elicitation rendering (`acdf223a800`), failed-subscription recovery (`59f7592b5d1`), generic config-picker integration, and the moved remote contribution path.
 
 - **2026-05-02** — `cb70af8eb9` — added "Per-turn model rendering" section: handler now builds a `TurnModelLookup` (`_createTurnModelLookup` injecting `ILanguageModelsService`) and passes it through `turnsToHistory` so each restored request gets its turn's `usage.model` (falling back to `SessionSummary.model?.id`) and each response carries `details: <displayName>`. Active-turn placeholder request uses the same per-turn fallback. Added debt entry covering missing multiplier/pricing on `SessionModelInfo`.
 - **2026-05-01** — b2e6267136 — reconciliation: no body changes. `8dbb8606e2c2` and `21706550d0fd` refined the final-resource / session-type plumbing already captured by the chat-session URI ownership section.

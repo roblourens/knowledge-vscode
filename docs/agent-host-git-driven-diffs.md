@@ -1,6 +1,6 @@
 # Agent Host Git-Driven Session Diffs
 
-_Covers: src/vs/platform/agentHost/node/agentHostGitService.ts, src/vs/platform/agentHost/node/gitDiffContent.ts, src/vs/sessions/contrib/agentHost/browser/agentHostDiffs.ts, src/vs/platform/agentHost/test/node/agentHostGitService.integrationTest.ts, src/vs/platform/agentHost/test/node/agentSideEffects.test.ts_
+_Covers: src/vs/platform/agentHost/node/agentHostGitService.ts, src/vs/platform/agentHost/node/gitDiffContent.ts, src/vs/sessions/contrib/providers/agentHost/browser/agentHostDiffs.ts, src/vs/platform/agentHost/test/node/agentHostGitService.integrationTest.ts, src/vs/platform/agentHost/test/node/agentSideEffects.test.ts_
 
 The "Branch changes" mode in the agents-app Changes view shows which files the agent modified since the session started. This is driven by `git diff` rather than by tracking individual editor saves, so it catches changes made via terminal commands, external tools, or any other mechanism.
 
@@ -8,7 +8,7 @@ The "Branch changes" mode in the agents-app Changes view shows which files the a
 
 1. **Anchor point** — When `CopilotAgent` creates or resumes a session it writes `META_DIFF_BASE_BRANCH` (`'agentHost.diffBaseBranch'`) into the per-session database. The value is the name of the branch from which the worktree was forked (e.g. `main`). `AgentSideEffects._computeGitDrivenDiffs` reads it back at turn-end.
 
-2. **Diff computation** (`AgentHostGitService.computeSessionFileDiffs`) — Runs `git diff --raw --numstat --diff-filter=ADMR -z <mergeBase> --` in the session's working directory. `mergeBase` is `git merge-base HEAD <baseBranch>`, falling back to `HEAD` alone when no base branch is stored or resolvable. When the working tree has untracked files (common after a tool writes a new file before it is committed), the diff is run against a **temp index** (see below).
+2. **Diff computation** (`AgentHostGitService.computeSessionFileDiffs`) — Runs `git diff --raw --numstat --diff-filter=ADMR -z <mergeBase> --` in the session's working directory. `mergeBase` is resolved against the recorded base branch, preferring its `origin/<default>` tracking ref when that is the stable branch identity; branch-base maintenance also repairs stored worktree metadata after the base moves so branch diffs keep comparing against the intended lineage. It falls back to `HEAD` alone when no base branch is stored or resolvable. When the working tree has untracked files (common after a tool writes a new file before it is committed), the diff is run against a **temp index** (see below).
 
 3. **Temp index dance** (`_runWithTempIndex`) — Creates a throwaway `GIT_INDEX_FILE` in a temp dir, seeds it with `git read-tree HEAD` (or the empty-tree SHA for HEAD-less repos), stages everything with `git add -A -- :/`, and runs `git diff --cached`. Sets `COMMAND_HOOK_LOCK=1` to prevent GVFS repos from acquiring the per-worktree hook lock during the temp-index operations, mirroring the extension-host CLI's `buildTempIndexEnv`.
 
@@ -61,6 +61,8 @@ git-blob://<hex(sessionUri)>/<urlencode(sha)>/<hex(repoRelativePath)>/<basename>
 - **debt** (2026-04-26, agentSideEffects.ts:_computeGitDrivenDiffs) — the git-driven diff path in `AgentSideEffects` falls back silently to no-op when `META_DIFF_BASE_BRANCH` is absent from the DB. This means sessions created before the key was introduced (or sessions for non-worktree repos) simply show no branch-changes diffs without any indication why. A future improvement would be to fall back to a `getDefaultBranch()` call when the key is absent, rather than skipping the diff entirely.
 
 ## Changelog
+
+- **2026-05-15** — 12443ea83d — reconciliation: documented worktree/base-branch diff repair from `e1615a45e22` and `514255bd1ea`, and updated the Sessions provider path after `a3d955d72ad`.
 
 - **2026-05-01** — b2e6267136 — reconciliation: no body changes. `8ae0d8eab63d` introduced the git-driven diffs already documented here; later worktree cleanup, plugin configuration, and activity-event commits in this area did not change the diff architecture or `agentHostDiffs.ts` shape rules.
 - **2026-04-26** — `b86149ad81` — initial entry. PR [#312632](https://github.com/microsoft/vscode/pull/312632).
