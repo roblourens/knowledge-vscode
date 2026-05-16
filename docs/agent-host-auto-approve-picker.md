@@ -10,7 +10,7 @@ There are two picker contexts in the tree, each scoped to one rendering surface.
 
 | Widget | Location | Rendered in | Owner |
 |---|---|---|---|
-| `PermissionPicker` / `MobilePermissionPicker` | `src/vs/sessions/contrib/copilotChatSessions/browser/permissionPicker.ts`, `mobilePermissionPicker.ts` | The Agents app's **new-chat page** (`Menus.NewSessionControl`) | Sessions layer |
+| `PermissionPicker` / `MobilePermissionPicker` | `src/vs/sessions/contrib/providers/copilotChatSessions/browser/permissionPicker.ts`, `mobilePermissionPicker.ts` | The Agents app's **new-chat page** (`Menus.NewSessionControl`) | Sessions layer |
 | `PermissionPickerActionItem` | `src/vs/workbench/contrib/chat/browser/widget/input/permissionPickerActionItem.ts` | The running **chat input toolbar** (`MenuId.ChatInputSecondary`) — both VS Code chat and the Agents app's running session | Workbench layer |
 
 Both widgets accept delegate interfaces that are **structurally compatible for the shared permission-level fields** (defined separately in each layer with the matching field names `currentPermissionLevel`, `setPermissionLevel`, optional `isApplicable`). That means a single `AgentHostPermissionPickerDelegate` can drive both — which is what we do for agent-host sessions. The workbench `PermissionPickerActionItem` also has optional extension-contributed permission callbacks (`getExtensionPermissions` / `setExtensionPermission`) used by other chat providers; the agent-host delegate intentionally does not implement those because its contract is the well-known AHP `autoApprove` value.
@@ -113,6 +113,8 @@ The tests use a fake provider and exercise the delegate in isolation. The common
 - **gotcha** (2026-05-15, agentHostPermissionPickerActionItem.ts:render) — an inapplicable running-session picker must hide its outer render container, not only the inner label element. `.chat-input-picker-item` carries toolbar min-width/layout participation, so inner-only hiding leaves an empty gap beside visible controls.
 
 ## Changelog
+
+- **2026-05-15** — 12443ea83d — reconciliation: mechanical path audit refreshed the moved Copilot new-chat permission-picker path; the doc's covered Agent Host picker area had no additional post-baseline behavioral drift.
 
 - **2026-05-15** — bb32c5e7de — documented Claude Agent Host `permissionMode` picker placement, generic enum footer-hook ownership, the toolbar-wrapper visibility gotcha, and focused footer-path test coverage.
 

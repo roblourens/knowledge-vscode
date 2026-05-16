@@ -1,6 +1,6 @@
 # Agent Host design principles
 
-_Covers: src/vs/platform/agentHost/, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/, src/vs/sessions/contrib/agentHost/, src/vs/sessions/contrib/remoteAgentHost/, extensions/copilot/src/extension/chatSessions/copilotcli/, extensions/copilot/src/extension/conversation/vscode-node/chatParticipants.ts, extensions/copilot/src/platform/chat/common/chatAgents.ts_
+_Covers: src/vs/platform/agentHost/, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/, src/vs/sessions/contrib/providers/agentHost/, src/vs/sessions/contrib/providers/remoteAgentHost/, extensions/copilot/src/extension/chatSessions/copilotcli/, extensions/copilot/src/extension/conversation/vscode-node/chatParticipants.ts, extensions/copilot/src/platform/chat/common/chatAgents.ts_
 
 These principles bias future agents when the code, docs, and current implementation leave more than one reasonable path. They are not a catalog of component-specific rules. If a rule names a specific interface property, method, protocol action, or source file, it usually belongs in the relevant component doc or a `gotcha:` entry instead.
 
@@ -12,7 +12,7 @@ The defining property of AHP is that the agent runs without a client. Clients ar
 
 ## Terminology and comparison points
 
-When Rob says **Agent Host**, he usually means the new AHP-backed implementation in VS Code core: provider/process code under `src/vs/platform/agentHost/`, workbench chat adapters under `src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/`, and Sessions app providers under `src/vs/sessions/contrib/agentHost/` and `src/vs/sessions/contrib/remoteAgentHost/`. This is the implementation we are moving toward.
+When Rob says **Agent Host**, he usually means the new AHP-backed implementation in VS Code core: provider/process code under `src/vs/platform/agentHost/`, workbench chat adapters under `src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/`, and Sessions app providers under `src/vs/sessions/contrib/providers/agentHost/` and `src/vs/sessions/contrib/providers/remoteAgentHost/`. This is the implementation we are moving toward.
 
 When Rob says **extension-host CLI** or **extension-host Copilot CLI**, he means the older, more fully fleshed out Copilot CLI integration that runs inside the Copilot extension host. It lives in `extensions/copilot/src/extension/chatSessions/copilotcli/`, with registration in `extensions/copilot/src/extension/chatSessions/vscode-node/chatSessions.ts`. Useful comparison anchors:
 
@@ -54,6 +54,8 @@ Push back on protocol or API shapes that put a concept at the wrong layer, mirro
 - This is not a substitute for reading code and relevant docs. The code remains the source of truth; this doc biases judgment under ambiguity.
 
 ## Changelog
+
+- **2026-05-15** — 12443ea83d — reconciliation: no principle changes. Provider-folder moves (`a3d955d72ad`), Claude growth, transport liveness/reconnect, and customization discovery all apply the existing ownership/layering principles; refreshed path examples only.
 
 - **2026-05-04** — 939d3f227c — reconciliation: no principle changes. Protocol SemVer negotiation (`e1a89568eb2`), explicit filesystem permission negotiation (`c30ed7c4a51`), eager provisional session creation (`8309b22051c`), and mobile/remote UI polish all apply existing principles: fail explicitly for contract mismatches, keep resource truth at the owning side, and adapt VS Code UI without distorting AHP.
 

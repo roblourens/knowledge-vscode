@@ -1,6 +1,6 @@
 # Agent Host Topology and Protocol Philosophy
 
-_Covers: src/vs/platform/agentHost/, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostChatContribution.ts, src/vs/sessions/contrib/remoteAgentHost/, src/vs/sessions/contrib/sessions/browser/views/sessionsList.ts, src/vs/sessions/contrib/chat/browser/webWorkspacePicker.ts_
+_Covers: src/vs/platform/agentHost/, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostChatContribution.ts, src/vs/sessions/contrib/providers/remoteAgentHost/, src/vs/sessions/services/agentHostFilter/, src/vs/sessions/contrib/sessions/browser/views/sessionsList.ts, src/vs/sessions/contrib/chat/browser/webWorkspacePicker.ts_
 
 This is the **orientation doc**. It answers four questions that come up at the start of every agent-host task:
 
@@ -34,7 +34,7 @@ The sibling [`agent-host-protocol`](https://github.com/microsoft/agent-host-prot
 - **ACP** (Agent Client Protocol) is a 1:1 communication protocol between a single client and a single agent.
 - **AHP** is a coordination layer for **N clients sharing a host that hosts agents**. The host is the source of truth; clients reconcile.
 
-They compose: an AHP host *could* speak ACP downstream to agents. We don't do that today — our in-tree first-party agents (Copilot today, Claude planned) sit alongside `CopilotAgent` as in-process `IAgent` implementations using vendor SDKs directly. The host/agent layering is **collapsed in-process by design** for first-party agents.
+They compose: an AHP host *could* speak ACP downstream to agents. We don't do that today — our in-tree first-party Copilot and Claude providers sit side by side as in-process `IAgent` implementations using vendor SDKs directly. The host/agent layering is **collapsed in-process by design** for first-party agents.
 
 A future ACP bridge — `class AcpAgent implements IAgent` — is reserved for *external* agents that already speak ACP. It is not the eventual home for our own agents. New first-party agents follow the `CopilotAgent` shape.
 
@@ -174,7 +174,7 @@ VS Code (the IDE) gets configuration A only. The Agents app gets B and any numbe
 
 ### Remote host scoping in the Agents app
 
-When the Agents app runs in web with remote agent hosts, the active host is also a piece of app chrome, not protocol state. `AgentHostFilterService` (`src/vs/sessions/contrib/remoteAgentHost/browser/agentHostFilterService.ts`) watches registered remote `IAgentHostSessionsProvider`s, tracks their connection statuses, persists the selected provider id, and exposes reconnect/disconnect commands. `HostFilterActionViewItem` renders that state as the titlebar host dropdown.
+When the Agents app runs in web with remote agent hosts, the active host is also a piece of app chrome, not protocol state. `AgentHostFilterService` (`src/vs/sessions/services/agentHostFilter/browser/agentHostFilterService.ts`) watches registered remote `IAgentHostSessionsProvider`s, tracks their connection statuses, persists the selected provider id, and exposes reconnect/disconnect commands. `HostFilterActionViewItem` renders that state as the titlebar host dropdown.
 
 The selected provider id scopes Agents-app surfaces that need a single host context: `sessionsList.ts` filters the sessions list to the selected provider, and `webWorkspacePicker.ts` filters workspace choices to the same provider (with a phone-layout bottom-sheet variant on web). This is deliberately above `IAgentConnection`: the protocol still sees independent remote hosts, while the app decides which host the user is currently looking at.
 
@@ -240,7 +240,7 @@ The decision tree, in order:
 3. **Does it run a turn or render session state?** → `AgentHostSessionHandler` (works in all three configurations). See [agent-host-session-handler](./agent-host-session-handler.md).
 4. **Is it about *which* agents/sessions exist or how they're listed?** → Start at the provider/listing owner. SDK-backed local agents, for example, should filter or adopt sessions in the provider (`CopilotAgent.listSessions`) before generic `AgentService` aggregation or UI providers see them. Registration/list UI belongs in a `*Contribution` (`AgentHostContribution` for local; `RemoteAgentHostContribution` for remote) and a `*SessionsProvider` (Agents app only).
 5. **Is it Agents-app-only chrome** (sidebar, sessions view, titlebar host filter)? → `src/vs/sessions/contrib/`.
-6. **Is it host-level or per-session configuration** (a new well-known config key, a new way to view or edit values)? → The platform-side schema + key list lives in `src/vs/platform/agentHost/common/sessionConfigKeys.ts` and `agentHostSchema.ts`; server-side `session → parent subagent → host` resolution lives in `src/vs/platform/agentHost/node/agentConfigurationService.ts` (`IAgentConfigurationService.getEffectiveValue`); UI editors for the synthetic per-session and host-level JSONC files live in `src/vs/sessions/contrib/agentHost/browser/agentSessionSettings.contribution.ts` and `agentHostSettings.contribution.ts`. See [agent-host-sessions-providers](./agent-host-sessions-providers.md#settings-editor-file-system-providers).
+6. **Is it host-level or per-session configuration** (a new well-known config key, a new way to view or edit values)? → The platform-side schema + key list lives in `src/vs/platform/agentHost/common/sessionConfigKeys.ts` and `agentHostSchema.ts`; server-side `session → parent subagent → host` resolution lives in `src/vs/platform/agentHost/node/agentConfigurationService.ts` (`IAgentConfigurationService.getEffectiveValue`); UI editors for the synthetic per-session and host-level JSONC files live in `src/vs/sessions/contrib/providers/agentHost/browser/agentSessionSettings.contribution.ts` and `agentHostSettings.contribution.ts`. See [agent-host-sessions-providers](./agent-host-sessions-providers.md#settings-editor-file-system-providers).
 7. **Is it local-only lifecycle** (restart, port wiring, dev mode)? → `IAgentHostService` and friends, *not* the handler.
 
 If you can't place a piece of code in exactly one of these buckets, that's the moment to pause and re-read this doc — there's almost always a layering mistake hiding in the ambiguity.
@@ -342,6 +342,8 @@ A short list of the values that drive design decisions in the agent host. When i
 - **gotcha** (2026-04-22, *RelayTransport.dispose) — relay-transport `dispose()` implementations are responsible for telling the shared-process side to close the underlying connection. `TunnelRelayTransport.dispose()` and `TunnelConnectionTransport.dispose()` both do this; `SSHRelayTransport.dispose()` historically did NOT (it only removed IPC listeners), which is why removing an SSH-backed remote leaked the tunnel until the SSH renderer started passing its own `transportDisposable` that calls `_mainService.disconnect(connectionId)`. If you add a new relay transport, make sure its `dispose()` either closes the shared-process connection itself or that the renderer that owns it passes a `transportDisposable` that does.
 
 ## Changelog
+
+- **2026-05-15** — 12443ea83d — reconciliation: refreshed Sessions-provider and host-filter paths after `a3d955d72ad` / `6e68b4ccbb6`, updated the topology text now that Claude is an in-tree `IAgent`, and recorded that reconnect/liveness, customization, and OTel work remain concrete applications of the existing topology rather than a principle change.
 
 - **2026-05-04** — 939d3f227c — reconciliation: updated remote host scoping after `2fc10e36d28` renamed `scopedWorkspacePicker.ts` to `webWorkspacePicker.ts` and added mobile bottom-sheet behavior; documented reverse filesystem permission gating from `c30ed7c4a51`; no principle/topology change for protocol-version negotiation (`e1a89568eb2`) beyond the remote incompatibility state covered by narrower docs.
 

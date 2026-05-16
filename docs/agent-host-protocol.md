@@ -96,6 +96,9 @@ The legacy local `sessionCapabilities.ts` helper was removed when generated SemV
 - Session config values are typed `Record<string, unknown>` (widened from `Record<string, string>`); `SessionConfigChanged` carries an optional `replace?: boolean` to distinguish merge vs full replacement.
 - `SessionState._meta?: Record<string, unknown>` — generic well-known-keyed metadata slot, dispatched by `SessionMetaChanged` and applied by `setSessionMeta` server-side. Used today for the `git` slot (`SESSION_META_GIT_KEY`, with `ISessionGitState` shape and `readSessionGitState` / `withSessionGitState` helpers in `sessionState.ts`) so server-computed git state can ride along with normal session-state subscriptions instead of needing a bespoke command. Add new well-known keys here rather than expanding the typed `SessionState` surface when a field is conceptually optional, server-computed, and well-known by string key.
 - `resourceRequest` / `PermissionDenied` — bidirectional permission negotiation for resource access. A failed resource command may throw `PermissionDenied` (-32009) with `PermissionDeniedErrorData.request`; the caller can then issue `resourceRequest` with that payload and retry if granted.
+- `sessionConfigCompletions` and `completions` — generated commands for dynamic config enums and chat-input completions. `InitializeResult.completionTriggerCharacters` tells clients which typed characters should trigger user-message completion requests; completion items may surface commands, skills, and attachment-backed references without introducing client-only inference.
+- `SessionInputRequest` plus `SessionInputRequested` / answer / completion actions — generic state for agent-originated user-input requests such as MCP elicitation forms or URL affordances. Providers translate SDK-specific prompts into this protocol shape; clients render and answer it through normal session state.
+- `SessionModelInfo._meta` — provider-supplied model metadata bag. Pricing/multiplier data now travels through this generic slot rather than growing a Copilot-specific wire field.
 
 ## Where to edit
 
@@ -124,6 +127,8 @@ The legacy local `sessionCapabilities.ts` helper was removed when generated SemV
 - **gotcha** (2026-04-20, AHP authentication contract — `protectedResources.required: true`) — agents whose `protectedResources` declare `required: true` (default) MUST throw `AHP_AUTH_REQUIRED` (-32007) for any command issued before authentication, NOT return empty results. The provider-side temptation is to return `[]` from `listSessions` / model list etc. when no token; that silently breaks one-shot caches in the consumer and causes hard-to-trace UI bugs (sidebar shows nothing forever until something else forces a refresh). See `changes/2026-04-20-fix-initial-session-list-display/` and the concrete rule in `copilot-agent-provider.md`.
 
 ## Changelog
+
+- **2026-05-15** — 12443ea83d — reconciliation: documented generated completions, user-input request state, and generic model metadata after `5788cd3ebf8`, `5af88b2d0b5`, `d07965642c9`, and the later elicitation plumbing consumed by providers.
 
 - **2026-05-04** — 939d3f227c — reconciliation: documented SemVer `initialize.protocolVersions` negotiation and `UnsupportedProtocolVersion` (-32005) from `e1a89568eb2`; documented bidirectional `resourceRequest` and `PermissionDenied` (-32009) resource-access negotiation from `c30ed7c4a51`; no body changes needed for subagent URI helpers (`fd6d37812b4`) or eager provisional session internals (`8309b22051c`) because those are service/provider-layer behavior rather than new protocol state shapes.
 

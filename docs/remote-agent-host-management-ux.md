@@ -1,8 +1,8 @@
 # Remote Agent Host Management UX
 
-_Covers: src/vs/sessions/contrib/chat/browser/sessionWorkspacePicker.ts, src/vs/sessions/contrib/remoteAgentHost/browser/remoteAgentHostActions.ts, src/vs/sessions/contrib/remoteAgentHost/browser/manageRemoteAgentHosts.ts, src/vs/sessions/contrib/remoteAgentHost/browser/remoteHostOptions.ts, src/vs/platform/actionWidget/browser/actionList.ts, src/vs/platform/agentHost/common/sshRemoteAgentHost.ts, src/vs/platform/agentHost/node/sshRemoteAgentHostService.ts_
+_Covers: src/vs/sessions/contrib/chat/browser/sessionWorkspacePicker.ts, src/vs/sessions/contrib/providers/remoteAgentHost/browser/remoteAgentHostActions.ts, src/vs/sessions/contrib/providers/remoteAgentHost/browser/manageRemoteAgentHosts.ts, src/vs/sessions/contrib/providers/remoteAgentHost/browser/remoteHostOptions.ts, src/vs/platform/actionWidget/browser/actionList.ts, src/vs/platform/agentHost/common/sshRemoteAgentHost.ts, src/vs/platform/agentHost/node/sshRemoteAgentHostService.ts_
 
-The remote agent host management UX lives in `src/vs/sessions/contrib/remoteAgentHost/browser/` and provides three surfaces: an SSH connection picker, a tunnel connection picker, a per-remote options popup, and a standalone "Manage Remote Agent Hosts" F1 command. All surfaces use QuickPick from `IQuickInputService`.
+The remote agent host management UX lives in `src/vs/sessions/contrib/providers/remoteAgentHost/browser/` and provides three surfaces: an SSH connection picker, a tunnel connection picker, a per-remote options popup, and a standalone "Manage Remote Agent Hosts" F1 command. All surfaces use QuickPick from `IQuickInputService`.
 
 For how SSH and tunnel connections are established and maintained at the provider level, see [agent-host-sessions-providers](./agent-host-sessions-providers.md). This doc covers only the picker/action UX layer.
 
@@ -28,6 +28,8 @@ Invoked from the SSH picker's footer or from the F1 command `workbench.action.se
 ## Tunnel connection picker (`promptToConnectViaTunnel`)
 
 Shows dev tunnels from `ITunnelAgentHostService.listTunnels()`. The picker opens immediately in busy state while tunnels are being fetched. Supports `options.showBackButton` and returns `'back'`.
+
+The current remote-tab flow deliberately separates discovery from connection. The Remote experiment can be hidden or gated in the workspace picker, but explicit tunnel/SSH management actions still route through these picker helpers; on tunnel auth paths, keyboard-accessible fallbacks keep the user from being stranded on providers that cannot complete the preferred Microsoft-auth flow end to end.
 
 ## Per-remote options (`showRemoteHostOptions`)
 
@@ -99,6 +101,8 @@ The one **legitimate exception** is transitioning from `actionWidgetService.hide
 - **gotcha** (2026-04-26, remoteAgentHostActions.ts:configureSSHHosts run + promptToConnectViaSSH) — back-button callbacks propagate via `commandService.executeCommand(id, onBack)`. The `Action2.run(accessor, onBack?)` receives the callback as the second arg. All actions in this module that can be invoked both directly (no back button) and from a parent picker (with back button) follow this pattern. Do not move to a service/context — the callback captures the parent picker's closure.
 
 ## Changelog
+
+- **2026-05-15** — 12443ea83d — reconciliation: updated provider paths after `a3d955d72ad` and refreshed the remote-tab/tunnel picker behavior touched by `a512727d3c6`, `f505d201296`, `63a4d486a04`, `e5ebfeb5eb3`, and `cb383df993c`.
 
 - **2026-05-04** — 939d3f227c — reconciliation: documented the incompatible-protocol validation banner and manual reconnect behavior from `e1a89568eb2`; no body change needed for mobile workspace-picker layout polish in `2fc10e36d28` beyond existing picker semantics.
 

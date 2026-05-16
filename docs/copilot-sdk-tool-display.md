@@ -4,6 +4,8 @@ _Covers: src/vs/platform/agentHost/node/copilot/copilotToolDisplay.ts, src/vs/pl
 
 `copilotToolDisplay.ts` normalizes Copilot SDK tool calls into the generic display fields (`displayName`, `invocationMessage`, `pastTenseMessage`, `confirmationTitle`) that flow through AHP as `StringOrMarkdown`. `mapSessionEvents.ts` handles history replay of SDK events, while `commandLineHelpers.ts` rewrites shell command display at the AHP boundary.
 
+The workbench adapter now also preserves structured tool input/output data when the AHP state carries it, rather than flattening every Copilot tool call into message strings. That keeps the richer input/output UI in `stateToProgressAdapter.ts` provider-neutral: Copilot supplies display fields and payloads, AHP carries the generic state, and the chat renderer chooses the matching presentation.
+
 ## Tool display messages
 
 Plain strings are rendered as literal text by the chat UI. Any message containing markdown syntax (backticks for inline code, `[text](uri)` links, etc.) MUST be wrapped with the local `md()` helper so it ships as `{ markdown: ... }`. A bare string with backticks renders the backticks as visible characters.
@@ -117,6 +119,8 @@ The extension-host Copilot CLI cannot do this synthesis — it only sees the `sk
 - [copilot-sdk-shells](./copilot-sdk-shells.md) — managed shells and shell-tool permission asymmetry.
 
 ## Changelog
+
+- **2026-05-15** — 12443ea83d — reconciliation: documented provider-neutral tool input/output rendering from `bdb8a618815`; tool-name matching (`0d2147edf72`), apply-patch rendering, and replay fixes stay within the existing display-normalization model.
 
 - **2026-05-02** — d7edc11461 — added "Search tools (grep and rg)" section: separate ICopilotGrepToolArgs/ICopilotRgToolArgs interfaces, SEARCH_TOOL_NAMES, getToolKind returning 'search', IChatSearchToolInvocationData toolSpecificData pipeline, and the two-layer outer/inner icon architecture. Added gotchas: never merge per-tool interfaces; the double-icon bug and how to add type icons via the outer layer.
 - **2026-05-01** — b2e6267136 — reconciliation: removed stale generic-mapper coverage after `2a5c152b65b9` dropped that abstraction; current ownership is `copilotAgentSession.ts` live events plus `mapSessionEvents.ts` history replay, with `copilotToolDisplay.test.ts` covering display normalization. Reworded the multi-round reasoning gotcha in current file terms instead of deleting it.

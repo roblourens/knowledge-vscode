@@ -55,6 +55,8 @@ All callbacks handed to the Copilot SDK (`handlePermissionRequest`, `handleUserI
 
 ## Changelog
 
+- **2026-05-15** — 12443ea83d — reconciliation: no permission-contract prose changes. Elicitation, replay, and tool-display commits touched nearby Copilot session files, but the existing auto-approval, callback error logging, and subagent routing guidance remains current.
+
 - **2026-05-04** — 81095cbaba — added "Subagent event routing" section documenting `_parentToolCallIdsByAgentId`, event-level `agentId` routing, `_shouldDropUnmappedSubagentEvent`, and per-subagent `_currentMarkdownPartIds`/`_currentReasoningPartIds` Maps. Added two gotchas: `data.parentToolCallId` is deprecated (use event-level `agentId`); the part-id Maps must be per-subagent or the parent's final live message is clobbered.
 - **2026-05-01** — b2e6267136 — reconciliation: no body changes. The auto-approve / plan-mode / activity-event commits in this range preserve the existing permission-callback architecture; the dedicated picker changes are documented in `agent-host-auto-approve-picker.md`.
 - **2026-04-24** — 4b6403a3ab — split permission handling and SDK callback safety out of the Copilot provider overview
