@@ -44,6 +44,12 @@ The watchdog now supervises idle links too. Every tick with no pending RPCs send
 
 Transport JSONL logging is wired around this client by the remote service when Agent Host AHP logging is enabled. Keep that logging at the transport/client boundary: it is for reconstructing request/response/reconnect chronology, not for feature-level business logging.
 
+## Client-fed root config
+
+After a successful handshake, the remote client may send client-environment facts that the host process needs as root config state. Telemetry level is the first such key: the client dispatches `root/configChanged` with the schema-known string enum `telemetryLevel` value so a remote Agent Host can clamp product telemetry off when any connected VS Code client has disabled telemetry. This is fire-and-forget host input, not optimistic user session history; use the non-optimistic dispatch path with `clientSeq: 0`.
+
+For the privacy and disablement rules, see [agent-host-telemetry](./agent-host-telemetry.md#disablement-and-telemetry-level-propagation).
+
 ## Session creation URI ownership
 
 `createSession(config?)` must preserve a client-provided `config.session`. The VS Code side now chooses the AHP session URI before asking a remote Agent Host to create the session: the chat/session resource already contains the raw id, and `AgentHostSessionHandler` passes `session: AgentSession.uri(provider, rawId)` through `IAgentConnection.createSession(...)`. The remote protocol client should generate `AgentSession.uri(provider, generateUuid())` only when `config.session` is absent.
@@ -92,6 +98,8 @@ The 2026-04-21 audit intentionally fixed only request lifecycle and structured e
 - **gotcha** (2026-04-21, remoteAgentHostProtocolClient.ts:dispose) - disposal must call `_handleClose(disposed)` before `super.dispose()` so `_onDidClose` is still live for `_raceClose()` listeners, and so intentional client disposal wins over transports that emit `onClose` during disposal.
 
 ## Changelog
+
+- **2026-05-16** — 73f8f98fef — documented the remote client's post-handshake root-config telemetry-level dispatch and why it uses the non-optimistic action path.
 
 - **2026-05-15** — 12443ea83d — reconciliation: documented soft reconnect/replay gating from `ca28b2066f2`, the reconnect-hang fix in `f91a396d242`, active AHP ping liveness from `90db24b194c`, and transport JSONL logging from `e85a8295788`; the older reconnect debt entry remains below as a cleanup candidate for explicit confirmation.
 

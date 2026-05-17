@@ -122,7 +122,7 @@ The server-side code has **two entry points** today, each a different deployment
 | `src/vs/platform/agentHost/node/agentHostMain.ts` | MessagePort over utility-process IPC | VS Code / Agents app main process | Workbench (parent process) |
 | `src/vs/platform/agentHost/node/agentHostServerMain.ts` | WebSocket | A launcher (tunnel, SSH wrapper, dev script) | The launcher / SIGTERM |
 
-When reading code, identify which shell it runs in — it determines transport, lifecycle, signal handling, and whether the parent process even exists.
+When reading code, identify which shell it runs in — it determines transport, lifecycle, signal handling, and whether the parent process even exists. Shared host-process services such as logging, OTel, and product telemetry are created by both shells and then passed into the shared server-side DI graph; see [agent-host-telemetry](./agent-host-telemetry.md) for the telemetry-specific bootstrap and disablement rules.
 
 ### The apps
 
@@ -241,7 +241,8 @@ The decision tree, in order:
 4. **Is it about *which* agents/sessions exist or how they're listed?** → Start at the provider/listing owner. SDK-backed local agents, for example, should filter or adopt sessions in the provider (`CopilotAgent.listSessions`) before generic `AgentService` aggregation or UI providers see them. Registration/list UI belongs in a `*Contribution` (`AgentHostContribution` for local; `RemoteAgentHostContribution` for remote) and a `*SessionsProvider` (Agents app only).
 5. **Is it Agents-app-only chrome** (sidebar, sessions view, titlebar host filter)? → `src/vs/sessions/contrib/`.
 6. **Is it host-level or per-session configuration** (a new well-known config key, a new way to view or edit values)? → The platform-side schema + key list lives in `src/vs/platform/agentHost/common/sessionConfigKeys.ts` and `agentHostSchema.ts`; server-side `session → parent subagent → host` resolution lives in `src/vs/platform/agentHost/node/agentConfigurationService.ts` (`IAgentConfigurationService.getEffectiveValue`); UI editors for the synthetic per-session and host-level JSONC files live in `src/vs/sessions/contrib/providers/agentHost/browser/agentSessionSettings.contribution.ts` and `agentHostSettings.contribution.ts`. See [agent-host-sessions-providers](./agent-host-sessions-providers.md#settings-editor-file-system-providers).
-7. **Is it local-only lifecycle** (restart, port wiring, dev mode)? → `IAgentHostService` and friends, *not* the handler.
+7. **Is it server-side product telemetry** (a fact that happens inside the host process, such as a message being handed to an agent)? → Put event reporting below UI adapters in `src/vs/platform/agentHost/node/` and keep GDPR event definitions in a focused helper such as `AgentHostTelemetryReporter`. See [agent-host-telemetry](./agent-host-telemetry.md).
+8. **Is it local-only lifecycle** (restart, port wiring, dev mode)? → `IAgentHostService` and friends, *not* the handler.
 
 If you can't place a piece of code in exactly one of these buckets, that's the moment to pause and re-read this doc — there's almost always a layering mistake hiding in the ambiguity.
 
@@ -342,6 +343,8 @@ A short list of the values that drive design decisions in the agent host. When i
 - **gotcha** (2026-04-22, *RelayTransport.dispose) — relay-transport `dispose()` implementations are responsible for telling the shared-process side to close the underlying connection. `TunnelRelayTransport.dispose()` and `TunnelConnectionTransport.dispose()` both do this; `SSHRelayTransport.dispose()` historically did NOT (it only removed IPC listeners), which is why removing an SSH-backed remote leaked the tunnel until the SSH renderer started passing its own `transportDisposable` that calls `_mainService.disconnect(connectionId)`. If you add a new relay transport, make sure its `dispose()` either closes the shared-process connection itself or that the renderer that owns it passes a `transportDisposable` that does.
 
 ## Changelog
+
+- **2026-05-16** — 73f8f98fef — documented Agent Host product telemetry as a shared host-process service owned by both server entry shells and added telemetry placement to the where-to-put-new-code tree.
 
 - **2026-05-15** — 12443ea83d — reconciliation: refreshed Sessions-provider and host-filter paths after `a3d955d72ad` / `6e68b4ccbb6`, updated the topology text now that Claude is an in-tree `IAgent`, and recorded that reconnect/liveness, customization, and OTel work remain concrete applications of the existing topology rather than a principle change.
 
