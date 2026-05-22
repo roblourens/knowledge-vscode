@@ -1,7 +1,0 @@
-{
-  "name": "vsckb",
-  "version": "0.1.0",
-  "description": "Personal knowledge base plugin for the VS Code agent host subsystem. The plugin contains skills that initialize a workspace-local knowledge checkout, plan work, implement with prior context, capture learnings, and reconcile drift.",
-  "license": "MIT",
-  "keywords": ["knowledge", "vscode", "agent-host", "documentation", "drift"]
-}

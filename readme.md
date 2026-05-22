@@ -2,11 +2,11 @@
 
 ## Overview
 
-This system maintains a personal knowledge base about the VS Code agent host subsystem, stored in a separate Git repo and accessed by AI coding agents via a set of namespaced skills. It is designed for one developer working with AI coding agents across multiple concurrent sessions on a large, multi-contributor codebase.
+This repo is the personal knowledge base for the VS Code agent host subsystem. It is accessed by AI coding agents through the `vsckb` skills, which are packaged separately in `git@github.com:roblourens/knowledge-vscode-skills.git`.
 
-This repo contains both the knowledge plugin and the knowledge base. The globally installed `vsckb` plugin is only the skill runner. When a skill runs in a VS Code workspace, it resolves or creates a workspace-local `.knowledge-vscode/` submodule pointing at `git@github.com:roblourens/knowledge-vscode.git`, then reads and writes the knowledge base at that checkout root.
+The globally installed `vsckb` plugin is only the skill runner. When a skill runs in a VS Code workspace, it resolves or creates a workspace-local `.knowledge-vscode/` submodule pointing at `git@github.com:roblourens/knowledge-vscode.git`, then reads and writes this knowledge base at that checkout root.
 
-The system is packaged as the **`vsckb` VS Code agent plugin** (under `vsckb/`, in the same Team Kit-style agent plugin format used by `vscode-team-kit`). The repository root contains the knowledge artifacts (`index.md`, `docs/`, `changes/`, `plan/`) and the plugin folder contains the skills (`explore`, `plan`, `implement`, `finalize`, `reconcile`, `interface-planner`, `help`) which manage the lifecycle of planning, implementing, documenting, and validating. Installing the plugin registers the skills under the `vsckb` namespace in VS Code (e.g. `vsckb:plan`, `vsckb:implement`).
+The knowledge repo contains only the mutable knowledge artifacts: `index.md`, `docs/`, `changes/`, and `plan/`. The plugin repo contains the marketplace metadata, plugin manifest, bootstrap script, and skills (`explore`, `plan`, `implement`, `finalize`, `reconcile`, `interface-planner`, `help`) that manage the lifecycle of planning, implementing, documenting, and validating.
 
 ---
 
@@ -16,7 +16,6 @@ The knowledge repo is this repo. Its structure:
 
 ```
 knowledge-vscode/
-├── marketplace.json
 ├── index.md
 ├── readme.md
 ├── docs/
@@ -32,11 +31,6 @@ knowledge-vscode/
 │   │   ├── plan.md
 │   │   └── tasks.md
 │   └── ...
-└── vsckb/
-    ├── .plugin/
-    │   └── plugin.json
-    └── skills/
-        └── ...
 ```
 
 ### `index.md`
@@ -94,9 +88,9 @@ Ephemeral planning artifacts for the current session. Each session gets its own 
 
 ## Skills
 
-These skills ship as part of the `vsckb` VS Code agent plugin in this repo, in the same Team Kit-style format used by `vscode-team-kit`. The repo-level `marketplace.json` points to `./vsckb/` as the plugin root. Installing the plugin registers the skills under the `vsckb` namespace, so they show up grouped in VS Code as `vsckb:plan`, `vsckb:implement`, etc.
+These skills ship as part of the `vsckb` VS Code agent plugin in `git@github.com:roblourens/knowledge-vscode-skills.git`, in the same Team Kit-style agent plugin format used by `vscode-team-kit`. Installing the plugin registers the skills under the `vsckb` namespace, so they show up grouped in VS Code as `vsckb:plan`, `vsckb:implement`, etc.
 
-Each skill resolves the knowledge root from the workspace where the user is working. If the workspace is already this repo, `KNOWLEDGE_REPO` is the workspace root. Otherwise, `KNOWLEDGE_REPO` is `.knowledge-vscode/`, a submodule checkout of `git@github.com:roblourens/knowledge-vscode.git`. The shared init helper lives at `vsckb/scripts/init-knowledge-checkout.sh`; skills run it before reading or writing knowledge. The parent workspace is expected to git-ignore `.knowledge-vscode` and `.gitmodules` from its root, so the helper does not edit ignore or exclude files.
+Each skill resolves the knowledge root from the workspace where the user is working. If the workspace is already this repo, `KNOWLEDGE_REPO` is the workspace root. Otherwise, `KNOWLEDGE_REPO` is `.knowledge-vscode/`, a submodule checkout of `git@github.com:roblourens/knowledge-vscode.git`. The shared init helper lives in the installed plugin repo at `vsckb/scripts/init-knowledge-checkout.sh`; skills run it before reading or writing knowledge. The parent workspace is expected to git-ignore `.knowledge-vscode` and `.gitmodules` from its root, so the helper does not edit ignore or exclude files.
 
 ### Write boundaries
 
@@ -193,7 +187,7 @@ A typical session:
 
 1. Open VS Code in the VS Code repo (or any worktree of it).
 2. Start a chat session and ask the agent to plan or implement.
-3. The first knowledge skill runs `vsckb/scripts/init-knowledge-checkout.sh` to create or reuse `.knowledge-vscode/` as a submodule. The parent workspace's root ignore config keeps `.knowledge-vscode` and `.gitmodules` out of normal commits.
+3. The first knowledge skill runs the installed plugin's `vsckb/scripts/init-knowledge-checkout.sh` to create or reuse `.knowledge-vscode/` as a submodule. The parent workspace's root ignore config keeps `.knowledge-vscode` and `.gitmodules` out of normal commits.
 4. The agent uses `plan` for larger work (writes to `plan/<slug>/` on `knowledge/<slug>`), or jumps straight to `implement` for smaller changes.
 5. Do the work. Agent reads relevant docs as needed.
 6. Run `finalize` to capture what was learned, update the docs, write a `changes/` entry, merge the knowledge branch to `main`, and push.
@@ -207,6 +201,8 @@ Periodically (e.g., weekly, or after a batch of teammates' PRs land):
 ## Design Decisions
 
 **Why a separate repo, not gitignored files in the VS Code repo:** Gitignored files aren't version-controlled. The knowledge base needs its own history, branching, and the ability to be shared later without touching the VS Code repo.
+
+**Why the skills live in a separate repo from the knowledge base:** Skills are executable workflow packaging; the knowledge base is mutable project memory. Keeping the marketplace/plugin repo separate lets the globally installed skill runner stay stable while this repo remains focused on the docs, plans, and change history that the skills read and update.
 
 **Why a workspace-local submodule instead of writing inside the installed plugin:** Globally installed skills should be stable and reusable across workspaces. The mutable knowledge state belongs with the workspace session that is using it, so each workspace gets `.knowledge-vscode/` as a submodule of this repo. The init helper centralizes the Git setup, relies on the parent workspace's root ignore config for `.knowledge-vscode` and `.gitmodules`, and unstages parent metadata after `git submodule add`, keeping the parent worktree clean while preserving a real Git checkout for the knowledge base.
 
