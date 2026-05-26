@@ -94,13 +94,15 @@ The one **legitimate exception** is transitioning from `actionWidgetService.hide
 
 ## Debt & gotchas
 
-- **gotcha** (2026-05-02, sessionWorkspacePicker.ts:onRemove + remoteHostOptions.ts:removeRemoteHost) — the workspace-picker X and "Remove Remote" must call the same helper. Do NOT call `IRemoteAgentHostService.removeRemoteAgentHost` directly from the X; tunnel providers need their `provider.disconnect()` hook to persist the user's disconnect intent and suppress future auto-connect.
+- **gotcha** (2026-05-02, sessionWorkspacePicker.ts:onRemove + remoteHostOptions.ts:removeRemoteHost) — the workspace-picker X and "Remove Remote" must call the same helper. Do NOT call `IRemoteAgentHostService.removeRemoteAgentHost` directly from the X; tunnel providers need their `provider.disconnect()` hook to persist the user's disconnect intent and suppress future auto-connect, and SSH providers need it to remove the configured entry before tearing the tunnel down (see [agent-host-sessions-providers § SSH-backed remote providers](./agent-host-sessions-providers.md#ssh-backed-remote-providers-disconnect-intent-is-removal)).
 - **gotcha** (2026-04-26, remoteAgentHostActions.ts:promptToConnectViaSSH) — there is no "Enter manually" static entry; the dynamic new-host item is synthesized from the current input. Do NOT re-add a static placeholder. The pattern mirrors Remote SSH extension behavior deliberately.
 - **gotcha** (2026-04-26, remoteAgentHostActions.ts:onDidAccept) — call `picker.hide()` inside `onDidAccept`, not `picker.dispose()`. `dispose()` inside `onDidAccept` triggers `onDidHide` twice-ish and causes double-resolve or double-dispose. The `DisposableStore` pattern in `onDidHide` handles all cleanup.
 - **gotcha** (2026-04-26, manageRemoteAgentHosts.ts:buildItems) — the "Remote Agent Hosts" separator header shows items regardless of `connectionStatus` — including Offline/Connecting. Do NOT rename it to "Connected" without also filtering to `connectionStatus === 'Connected'`.
 - **gotcha** (2026-04-26, remoteAgentHostActions.ts:configureSSHHosts run + promptToConnectViaSSH) — back-button callbacks propagate via `commandService.executeCommand(id, onBack)`. The `Action2.run(accessor, onBack?)` receives the callback as the second arg. All actions in this module that can be invoked both directly (no back button) and from a parent picker (with back button) follow this pattern. Do not move to a service/context — the callback captures the parent picker's closure.
 
 ## Changelog
+
+- **2026-05-25** — `69e5d4640d` — extended the inline-X gotcha to call out SSH (entry removal) alongside tunnel (persisted suppression); the X must go through the shared `removeRemoteHost(...)` → `provider.disconnect()` helper for both. Cross-links to the new [SSH-backed remote providers](./agent-host-sessions-providers.md#ssh-backed-remote-providers-disconnect-intent-is-removal) section.
 
 - **2026-05-15** — 12443ea83d — reconciliation: updated provider paths after `a3d955d72ad` and refreshed the remote-tab/tunnel picker behavior touched by `a512727d3c6`, `f505d201296`, `63a4d486a04`, `e5ebfeb5eb3`, and `cb383df993c`.
 
