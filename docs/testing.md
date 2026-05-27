@@ -121,6 +121,18 @@ Otherwise — single class or function, drive with events, assert on state?
 - **Reproduce regression tests by reverting the fix.** When adding a regression test for a bug you just fixed, briefly revert the fix and confirm the test fails — it's the only way to be sure the test actually exercises the broken path. Restore the fix immediately after.
 - **Prefer behavioral tests over private-field probes.** If a class stores something on a private map, drive the events that fill the map and assert on observable behavior (state, dispatched actions, follow-up events) rather than reading the map. The cleanup test in `agentSideEffects.test.ts` does this for `_pendingSubagentEvents`.
 
+## Exploratory UI testing via the launch skill
+
+The four layers above cover automated tests. For exploratory work — bug-bashing the running Agents window, validating that a multi-turn flow renders correctly, or reproducing a specific UI symptom against the real SDK — the canonical tool is the `launch` skill at `.agents/skills/launch/SKILL.md` in the VS Code repo. It launches Code OSS from sources into a slim-copied throwaway profile with unique debug ports, and drives the UI via `@playwright/cli` over CDP.
+
+This is not a substitute for automated tests, but it has caught classes of issues the four layers can't reach: tool-card rendering across multi-command turns, cancellation UX, session restore across process restart, approval-prompt visual layout, etc. Treat any finding from an exploratory run as a candidate for an automated test at one of the four layers above before declaring it "fixed".
+
+Three coordination details bite if missed (each surfaced in the 2026-05-26 terminal-tool bug bash):
+
+- **`files.simpleDialog.enable=true`** must be set in the launched profile. Without it, the new-session workspace picker's `Select…` action opens a native OS file dialog that is unreachable over CDP/SSH. The launch script applies this automatically as of `e6e488e018`.
+- **Pass `-s=$PW_SESSION`** (or `--session NAME`) on every `npx @playwright/cli ...` call when more than one Code OSS is running. The CLI runs a persistent per-session daemon (`cliDaemon.js`) keyed by session name; un-flagged callers all share the implicit `"default"` daemon and the most-recently-attached CDP wins for every subsequent command from any of those shells. The `monaco-paste.sh` helper honors the same flag and the `PW_SESSION` env var.
+- **macOS Mach-ports concurrency limit** caps usable parallel Code OSS instances at roughly 2–3 on a typical workstation. Beyond that, Crashpad's exception handler dies in a tight `mach_port_request_notification: invalid capability` loop and one or more instances become CDP-unresponsive. Not affected by session naming — it's an OS-level resource. Sequential or small-batch parallel runs are the practical answer.
+
 ## Related
 
 - [agent-host-protocol](./agent-host-protocol.md) — the contract that protocol integration tests exercise.
@@ -137,6 +149,8 @@ Otherwise — single class or function, drive with events, assert on state?
 - **gotcha** (2026-04-22, protocol/copilotRealSdk.integrationTest.ts) — when asserting on shell-command text the SDK emitted, anchor the regex with `^` and explicitly tolerate quoted variants (`cd "<dir>"` vs `cd <dir>`) and both chain operators (`&&` and `;`). A naked `String.includes("cd " + tempDir)` substring check misses quoted forms and is also tripped by tempDir appearing later in the same command. The cd-prefix-strip test uses `new RegExp('^cd (?:"' + esc + '"|' + esc + ')\\s*(?:&&|;)')` against the rewritten and the original command lines.
 
 ## Changelog
+
+- **2026-05-26** — e6e488e018 — added "Exploratory UI testing via the launch skill" section after the four automated layers. Documents the launch skill as the canonical bug-bash surface and the three coordination details that bite if missed: `files.simpleDialog.enable`, `-s=$PW_SESSION` on every CLI call, and the macOS Mach-ports cap on concurrent instances. See `changes/2026-05-26-agent-host-terminal-tool-bug-bash/`.
 
 - **2026-05-15** — 12443ea83d — reconciliation: refreshed the split Copilot/Claude real-SDK entrypoints plus shared helper after `0d23db45a18`, moved Agent Host provider paths, and kept the existing four-layer test model intact across newer Claude, completions, ping, and tool-display coverage.
 

@@ -24,6 +24,7 @@ For bash/zsh, command lines written via `executeCommandWithShellIntegration` and
 
 ## Debt & gotchas
 
+- **gotcha** (2026-05-26, terminal-tool output rendering) — ANSI color / SGR / bold escape sequences in terminal-tool stdout are **stripped** before they reach both the rendered tool card and the model. Output like `printf '\033[31mRED\033[0m \033[1mBOLD\033[0m'` shows up as plain `RED BOLD` in the chat UI, and the agent itself describes seeing "escape codes stripped". Codes aren't visible as raw `\033[…m` (so it's not just a render-as-text bug) — the strip happens somewhere on the path from SDK shell tool → AHP terminal action → display. Tools whose value depends on color (lint output, `git --color=always`, jest/mocha runners) lose their visual structure both for the user and for the model's interpretation. May be intentional given the SDK's default terminal pipeline; consider whether the `chat.agentHost.customTerminalTool.enabled` path should preserve or render ANSI. Bug-bash evidence: `files/bug-bash/s7/`.
 - **gotcha** (2026-04-22, copilotShellTools.ts:createShellTools) — secondary shell tools (`read_bash` / `write_bash` / `stop_bash` / `list_bash` and PowerShell variants) registered with `overridesBuiltInTool: true` MUST also set `skipPermission: true` to match the SDK's built-in behavior, where these helpers never call `permissions.request`. Without the flag, Agent Host raises a generic permission dialog for every `write_bash` etc., which is jarring (the upstream CLI/extension never ask). The display layer's permission rendering for these tools (`copilotToolDisplay.ts`) is now defense-in-depth — it ships nice fields if a request ever leaks through. Regression coverage: `copilotShellTools.test.ts:'shell helper tools (read/write/shutdown/list/redirect) are registered with skipPermission: true'`.
 - **gotcha** (2026-04-19, copilotShellTools.ts:executeCommandWithShellIntegration/executeCommandWithSentinel) — for bash/zsh managed shells, commands are prepended with a leading space to keep them out of shell history. This relies on `VSCODE_PREVENT_SHELL_HISTORY=1` being set on the PTY env (which the shell integration scripts translate to `HISTCONTROL=ignorespace`/`HIST_IGNORE_SPACE`). If you change either side independently, history suppression silently breaks. PowerShell intentionally has no prefix — PSReadLine handles it server-side.
 
@@ -34,6 +35,8 @@ For bash/zsh, command lines written via `executeCommandWithShellIntegration` and
 - [copilot-sdk-tool-display](./copilot-sdk-tool-display.md) — shell command display rewriting and permission display.
 
 ## Changelog
+
+- **2026-05-26** — e6e488e018 — bug bash recorded that ANSI color/SGR escape codes in terminal-tool output are stripped before reaching the chat UI or the model. Noted as a gotcha; see `changes/2026-05-26-agent-host-terminal-tool-bug-bash/`.
 
 - **2026-05-15** — 12443ea83d — reconciliation: refreshed permission-regression coverage to the current focused shell-tools test after the real-SDK suite split in `0d23db45a18`; zsh/alt-buffer and shell-guidance changes in the covered area did not change the managed-shell permission architecture.
 
