@@ -89,6 +89,42 @@ The announcement text is built by the local `buildWorktreeAnnouncementText(branc
 
 The `IAgentDeltaEvent` field is `content`, not `delta`. This typo is easy because of the event's name.
 
+## Session resume dedup and post-init registration
+
+Two paths can both call `_resumeSession(sessionId)` concurrently for the same id: `getSessionMessages` (subscribe — **not** routed through `_sessionSequencer`) and `sendMessage`'s outdated-config evict-and-resume path. Before dedup, both calls would each call `_createAgentSession` and synchronously do `_sessions.set(id, agentSession)`, and the underlying `DisposableMap.set` would dispose the **first** entry mid-`initializeSession()`. The fallout:
+
+- `Trying to add a disposable to a DisposableStore that has already been disposed` warnings as the first `agentSession`'s internal `_register(...)` calls fire after its store is dead.
+- The first caller (typically the subscribe path) is left with a half-initialised session: no event subscriptions, so `getMessages` returns nothing, and `sendMessage` later rejects with no agent invocation.
+
+The dedup is a thin per-id promise cache:
+
+```
+private readonly _resumingSessions = new Map<string, Promise<CopilotAgentSession>>();
+
+protected _resumeSession(sessionId: string): Promise<CopilotAgentSession> {
+  const existing = this._resumingSessions.get(sessionId);
+  if (existing) { return existing; }
+  const promise = this._doResumeSession(sessionId);
+  this._resumingSessions.set(sessionId, promise);
+  const cleanup = () => { if (this._resumingSessions.get(sessionId) === promise) { this._resumingSessions.delete(sessionId); } };
+  promise.then(cleanup, cleanup);
+  return promise;
+}
+```
+
+Identity-checked cleanup matters: a still-in-flight entry that was already replaced (e.g. another evict-resume cycle) must not be deleted by the late `.then(cleanup)` of the original promise.
+
+`_createAgentSession` no longer registers in `_sessions` itself. Both `_doResumeSession` and `_materializeProvisional` register only after `initializeSession()` succeeds, and dispose the half-built `CopilotAgentSession` on init throw. Registration goes through the shared helper:
+
+```
+private _registerInitializedSession(sessionId: string, agentSession: CopilotAgentSession): void {
+  if (this._shutdownPromise) { agentSession.dispose(); throw new CancellationError(); }
+  this._sessions.set(sessionId, agentSession);
+}
+```
+
+The `_shutdownPromise` guard exists because `shutdown()` only iterates `_sessions` + `_createdWorktrees`. An in-flight resume whose `initializeSession()` resolves AFTER `dispose() -> shutdown() -> super.dispose()` has disposed the `DisposableMap` would otherwise hit `_sessions.set(...)` on a disposed map — reproducing the very warning the dedup was added to eliminate, just from a different angle. PR [#318636](https://github.com/microsoft/vscode/pull/318636).
+
 ## Testing pattern
 
 Focused tests live in `copilotAgent.test.ts`. The SDK client is injected through a narrow protected factory seam because the SDK `CopilotClient` type has private members, which prevents lightweight structural fakes from being assigned to the class type directly.
@@ -96,6 +132,8 @@ Focused tests live in `copilotAgent.test.ts`. The SDK client is injected through
 For database-sensitive behavior, prefer real in-memory `SessionDatabase(':memory:')` instances where possible. The Copilot provider tests keep a small fake `ISessionDataService` only to control which session IDs have an existing database; the database implementation itself is real. This lets tests assert both the positive path (stored metadata is read) and the negative path (`listSessions()` does not call `openDatabase()` for unowned SDK sessions).
 
 For end-to-end flows that involve session lifecycle (create -> resume -> sendMessage -> restore), the test file defines a `TestableCopilotAgent` subclass that overrides `_resumeSession` to splice in a fake session implementing the minimal `IFakeAgentSession` interface (`send`, `getMessages`, `dispose`). Both `_resumeSession` and `_resolveSessionWorkingDirectory` are `protected` on `CopilotAgent` for this purpose. This is what makes it possible to write tests that exercise the full path through `sendMessage` and `getSessionMessages` without spinning up the real SDK.
+
+The `TestableCopilotAgent._resumeSession` override **bypasses the dedup wrapper**: tests written on top of it cannot exercise the per-id promise cache. Tests that need to exercise the dedup wrapper itself should use a real `CopilotAgent` (no SDK client; `createTestAgent(disposables)`) and monkey-patch `_doResumeSession` instead — that's the impl method the wrapper memoizes. See the `_resumeSession dedup` suite in `copilotAgent.test.ts` for the pattern, including the shutdown-race test that drives `_registerInitializedSession` directly with a seeded `_shutdownPromise`.
 
 Tests under `src/vs/platform/agentHost/test/node/` have two hygiene rules that are easy to trip on:
 
@@ -106,7 +144,8 @@ Run via `npm run test-node -- --grep <pattern>`. Do not use `scripts/test.sh` fo
 
 ## Debt & gotchas
 
-- **debt** (2026-05-26, copilotAgent.ts / Local Agent Host session restore) — A bug bash uncovered two session-restore correctness gaps with the in-process Local Agent Host provider. (1) A session created in one Code OSS launch is **missing from the sidebar** after the process is killed and a new Code OSS is started with **identical `--user-data-dir`/`--extensions-dir`/`--shared-data-dir`** flags. Other sessions persist; only the just-created one disappears. Suggests the agent host writes session metadata somewhere that isn't durably flushed before normal process exit, or the metadata location isn't covered by the UDD/shared-data-dir set we pass through. (2) Pre-existing sessions ARE visible in the sidebar with prior transcripts and tool cards rendered correctly, but sending **any new prompt fails with "Sorry, no response was returned"** — the session is effectively read-only after restart. `Try Again` returns the same error. Bug-bash evidence: `files/bug-bash/s9/` (Phase B same-launch reopen works perfectly; Phase C across-restart fails). Full reproduction steps in `changes/2026-05-26-agent-host-terminal-tool-bug-bash/`. Most-likely areas: `_resumeSession` / `getSessionMessages` paths in `copilotAgent.ts`, or upstream in `_stateManager` / Agent Host root-state hydration.
+- **debt** (2026-05-26, updated 2026-05-27, copilotAgent.ts / Local Agent Host session restore) — A bug bash uncovered two session-restore correctness gaps with the in-process Local Agent Host provider. (1) **Still open:** a session created in one Code OSS launch is **missing from the sidebar** after the process is killed and a new Code OSS is started with **identical `--user-data-dir`/`--extensions-dir`/`--shared-data-dir`** flags. Other sessions persist; only the just-created one disappears. Suggests the agent host writes session metadata somewhere that isn't durably flushed before normal process exit, or the metadata location isn't covered by the UDD/shared-data-dir set we pass through. (2) **Plausibly resolved, needs retest:** pre-existing sessions were visible in the sidebar with prior transcripts but sending **any new prompt failed with "Sorry, no response was returned"**. The symptom matches the `_resumeSession` race fixed by PR [#318636](https://github.com/microsoft/vscode/pull/318636) (see [Session resume dedup](#session-resume-dedup-and-post-init-registration)) — concurrent `getSessionMessages` + `sendMessage` would dispose the first half-built session mid-init, leaving the subscribe path with no event subscriptions and `sendMessage` rejecting with no agent invocation. Re-run the bug-bash Phase C repro (`changes/2026-05-26-agent-host-terminal-tool-bug-bash/files/bug-bash/s9/`) on a build with the dedup fix to confirm; only then remove this half.
+- **gotcha** (2026-05-27, copilotAgent.ts:_resumeSession / _doResumeSession / _registerInitializedSession) — `_resumeSession` is a thin per-`sessionId` dedup wrapper around `_doResumeSession`; do **not** collapse them back into a single method. Two concurrent `_resumeSession(id)` calls used to construct competing `CopilotAgentSession` instances, and the second `_sessions.set(...)` on the underlying `DisposableMap` disposed the first mid-`initializeSession()`. Both `_doResumeSession` and `_materializeProvisional` must register through `_registerInitializedSession`, which bails (dispose + `CancellationError`) when `_shutdownPromise` is already set. Without that guard, an in-flight resume whose init resolves after `dispose() -> shutdown() -> super.dispose()` would call `_sessions.set(...)` on a disposed map. See PR [#318636](https://github.com/microsoft/vscode/pull/318636) and the `_resumeSession dedup` test suite.
 - **gotcha** (2026-04-19, copilotAgent.ts:prependAnnouncementToFirstAssistantMessage) - the restore path for session announcements skips messages with `parentToolCallId` so the prepend lands on the first top-level assistant message. If you change this to "first assistant message", the announcement gets buried inside a subagent's history and disappears from the parent turn. Keep the `!m.parentToolCallId` filter.
 - **gotcha** (2026-04-19, copilotAgent.ts:sendMessage worktree announcement) - the live-path "first turn" announcement is intentionally in-process only (`_pendingFirstTurnAnnouncements` Map). It is lost if the agent process restarts between worktree creation and the first user prompt. That window is acceptable to lose because the restore path covers every reopen once any reply exists. Do not add a DB-backed "emitted" flag to "fix" this; we tried and reverted (see `changes/2026-04-19-worktree-progress-message/`).
 - **gotcha** (2026-04-19, agentService.ts:IAgentDeltaEvent) - the field is `content`, not `delta`. The event's name makes `delta` a tempting typo.
@@ -133,6 +172,8 @@ Run via `npm run test-node -- --grep <pattern>`. Do not use `scripts/test.sh` fo
 - [copilot-sdk-tool-display](./copilot-sdk-tool-display.md) - SDK tool display and command rewriting.
 
 ## Changelog
+
+- **2026-05-27** — 413ef42c9d — added "Session resume dedup and post-init registration" section documenting the per-`sessionId` `_resumingSessions` promise cache, the `_doResumeSession` impl split, and the `_registerInitializedSession` shutdown-race guard. Updated the testing-pattern section to note that `TestableCopilotAgent._resumeSession` bypasses the dedup wrapper (dedup tests monkey-patch `_doResumeSession` on a plain `createTestAgent(disposables)` instance). Added a gotcha keeping the wrapper/impl split and the `_shutdownPromise` guard intact. Marked half of the 2026-05-26 read-only-after-restart debt as plausibly resolved pending bug-bash retest. PR [#318636](https://github.com/microsoft/vscode/pull/318636).
 
 - **2026-05-26** — e6e488e018 — bug bash documented two cross-restart restore gaps for in-process Local Agent Host sessions (just-created session disappears from sidebar; pre-existing sessions go read-only with "Sorry, no response was returned" on new prompts). Recorded as `debt:` with bug-bash artifacts under `changes/2026-05-26-agent-host-terminal-tool-bug-bash/`.
 
