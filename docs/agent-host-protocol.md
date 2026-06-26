@@ -17,24 +17,47 @@ The mental model is **JSON-RPC plus immutable state**:
 ```
 src/vs/platform/agentHost/common/state/
 ├── protocol/                 ← generated surface, DO NOT EDIT
-│                                source of truth: ../agent-host-protocol repo
-├── sessionProtocol.ts        ← re-exports of the protocol surface for client code
-├── sessionState.ts           ← root / session / terminal state shapes
+│   │                            source of truth: ../agent-host-protocol repo
+│   ├── state.ts              ← re-export glue: `export *` from common/ + every channels-*/
+│   ├── actions.ts / commands.ts / reducers.ts / notifications.ts / messages.ts
+│   ├── errors.ts             ← AhpErrorCodes + the rich AhpError<C> type machinery
+│   ├── common/               ← cross-channel primitives (ActionType, BaseParams, UsageInfo, ...)
+│   ├── version/registry.ts   ← PROTOCOL_VERSION, ACTION/NOTIFICATION_INTRODUCED_IN maps
+│   ├── mcpAppDefaults.ts     ← DEFAULT_MCP_APP_CAPABILITIES
+│   └── channels-*/           ← one dir per subscribable channel (see below)
+├── sessionProtocol.ts        ← re-exports the JSON-RPC message/command/error surface
+├── sessionState.ts           ← re-exports generated state + VS Code-only `_meta` helpers
 ├── sessionActions.ts         ← action types dispatched by clients, applied by server
 ├── sessionReducers.ts        ← reducers, used server-side AND client-side (optimistic)
 ├── agentSubscription.ts      ← AgentSubscriptionManager — the client read model
-└── sessionTransport.ts       ← transport abstractions (MessagePort, WebSocket, ...)
+├── sessionTransport.ts       ← transport abstractions (MessagePort, WebSocket, ...)
+└── AGENTS.md                 ← governing rules for editing this dir
 ```
 
-When the contract changes, the workflow is: edit the [`agent-host-protocol`](https://github.com/microsoft/agent-host-protocol) repo first, regenerate the `protocol/` subdir here, then update the surrounding shims and the server handler.
+The protocol now uses a **channel-based wire model** (`agentHost: adopt channel-based AHP wire model`). The old flat "root state / session state / terminal state" split is now a hierarchy of channels, one directory per subscribable URI scheme, each with its own `state.ts` + `actions.ts` + `reducer.ts` (+ optional `commands.ts` / `notifications.ts`). The top-level `protocol/state.ts` no longer defines `RootState` / `SessionState` / `TerminalState` itself — those live in their owning channel, and `state.ts` is pure re-export glue.
+
+| Channel dir | Owns | Subscribable URI |
+|---|---|---|
+| `channels-root` | `RootState`: advertised `agents`, `activeSessions?`, `terminals?`, host-level `config?`; `ModelSelection` / `SessionModelInfo` / `PolicyState` | `agenthost:/root` |
+| `channels-session` | `SessionState`: summary, lifecycle, `chats` catalog, `activeClients`, customizations, changeset catalogue, config | `copilot:/<rawId>` (per provider) |
+| `channels-chat` | `ChatState`: per-chat conversation — turns, active turn, tool calls, steering/queued messages, input requests | `ahp-chat:/<uuid>` |
+| `channels-terminal` | `TerminalState` / `TerminalInfo` / `TerminalClaim` | terminal URI |
+| `channels-changeset` | `Changeset` catalogue + `ChangesetState` (files + invokable operations) | `<sessionUri>/changeset/<id>` |
+| `channels-annotations` | `AnnotationsState` — file-anchored conversation/feedback annotations | `<sessionUri>/annotations` |
+| `channels-resource-watch` | `ResourceWatchState` — file/dir watchers | `ahp-resource-watch:` URI |
+| `channels-otlp` | OpenTelemetry-over-AHP log/trace/metric export | `ahp-otlp:` URI |
+
+When the contract changes, the workflow is: edit the [`agent-host-protocol`](https://github.com/microsoft/agent-host-protocol) repo first, regenerate the `protocol/` subdir here (`npx tsx scripts/sync-agent-host-protocol.ts`), then update the surrounding shims and the server handler. The governing rules live in `state/AGENTS.md`.
 
 ## Resource addressing
 
-State is URI-addressed.
+State is URI-addressed, one URI per channel instance.
 
 - **Root state:** `agenthost:/root` — advertised agents, models, protected resources, customizations, active session count, terminals, and host-level config (`RootState.config?: RootConfigState`).
-- **Session state:** keyed by provider URI such as `copilot:/<rawId>` or `mock:/<rawId>`. Use `AgentSession.uri(provider, rawId)` to construct canonically.
+- **Session state:** keyed by provider URI such as `copilot:/<rawId>` or `mock:/<rawId>`. Use `AgentSession.uri(provider, rawId)` to construct canonically. A session is now a **container of chats** (see [Multi-chat sessions](#multi-chat-sessions)).
+- **Chat state:** keyed by chat URI (`ahp-chat:/<uuid>`). The conversation itself — turns, tool calls, streaming deltas — lives on the chat channel, not the session channel.
 - **Terminal state:** keyed by terminal URI. Used by terminal subscriptions.
+- **Changeset / annotations state:** nested under the session URI (`<sessionUri>/changeset/<id>`, `<sessionUri>/annotations`). See [agent-host-git-driven-diffs](./agent-host-git-driven-diffs.md) and the annotations note below.
 
 ## Subscriptions
 
@@ -68,6 +91,39 @@ The `seq` drives **replay-based reconnection**: a client that drops and reattach
 
 Protocol-generated types do **not** carry an `I` prefix. The shapes generated under `state/protocol/` use plain names (`RootState`, `SessionState`, `ActionEnvelope`, `StateAction`, `FileEdit`, `ModelSelection`, …); the `I`-prefixed names from earlier docs no longer exist. Code outside `state/protocol/` may still wrap or re-export these under VS Code-style names, but the wire contract is the bare shape.
 
+## Multi-chat sessions
+
+A session is a **container of chats**, not a single conversation. This is the biggest protocol shift since the channel model: the conversation (turns, tool calls, streaming) lives on the **chat** channel; the **session** channel owns the catalog plus session-wide concerns (config, customizations, changesets, active clients).
+
+- `SessionState.chats: ChatSummary[]` — the catalog of chats in the session.
+- `SessionState.defaultChat?: URI` — the chat that receives input when the user addresses the session without picking a specific chat. It is a **UI routing hint, not a hierarchy marker** — chats are equal peers at the protocol level.
+- `ChatSummary` — lightweight catalog entry: `resource`, `title`, `status: SessionStatus`, `activity?`, `modifiedAt`, `model?` / `agent?` (per-chat overrides), `origin?: ChatOrigin`, `interactivity?: ChatInteractivity`, `workingDirectory?`.
+- `ChatState` (chat channel) **denormalizes** every `ChatSummary` field inline and adds `turns`, `activeTurn?`, `steeringMessage?`, `queuedMessages?`, `inputRequests?`. Producers MUST keep `ChatState` and the matching `ChatSummary` consistent.
+- `ChatOrigin` — how a chat came to exist: `{ kind: User }`, `{ kind: Fork; chat; turnId }`, or `{ kind: Tool; chat; toolCallId }` (the canonical record of a tool-spawned subagent worker).
+- `ChatInteractivity` — `Full` (default), `ReadOnly`, `Hidden`; supports the agent-team lead/worker pattern.
+
+**Chat lifecycle.** Two commands on the chat channel — `createChat` (`CreateChatParams`: `channel` = session URI, `chat` = client-chosen `ahp-chat:/<uuid>`, optional `initialMessage` / `model` / `agent` / `source`) and `disposeChat`. **Forking** is a `createChat` with `source: ChatForkSource { chat; turnId }` — content up to and including that turn's response is copied into the new chat. Note the split: chat-content actions live on the **chat** channel, but **catalog** mutations live on the **session** channel (`SessionChatAdded` / `SessionChatRemoved` / `SessionChatUpdated` / `SessionDefaultChatChanged`), mirroring the root channel's `sessionAdded` / `sessionRemoved` / `sessionSummaryChanged` one level down.
+
+**Default-chat compatibility layer** (`agentHost: adopt multi-chat sessions protocol (default-chat compat layer)`). Single-chat-aware clients see a multi-chat session through `SessionSummary` aggregation. Once a session has more than one chat, `SessionSummary` fields are derived from the chat catalog:
+
+- `status` — activity bits from the `defaultChat` (else the most-recently-modified chat), but **promote `InputNeeded` if any chat needs input and `Error` if any chat is errored**. The `IsRead` / `IsArchived` flag bits stay session-scoped.
+- `activity` — the activity string of whichever chat drives the status bits.
+- `modifiedAt` — the **max** across all chats.
+- `model` / `agent` / `workingDirectory` — **session-level only**; per-chat overrides on `ChatSummary` are **not** aggregated up.
+- `changes` — optional roll-up across chats (sum, or the most expensive chat's stats).
+
+Single-chat sessions trivially satisfy all of the above (the chat's values pass through unchanged).
+
+## Multiple active clients per session
+
+A session can have several active clients at once (`agentHost: support multiple active clients per session`). This is modeled purely as protocol state — there is **no** `IAgentHostActiveClientService`.
+
+- `SessionState.activeClients: SessionActiveClient[]` — keyed by `clientId` (the id from `initialize`). Each entry carries `displayName?`, `tools: ToolDefinition[]`, and `customizations?`.
+- Lifecycle actions (all client-dispatchable, upsert/remove by `clientId`): `SessionActiveClientSet`, `SessionActiveClientRemoved` (the server SHOULD dispatch this automatically on disconnect), `SessionActiveClientToolsChanged`.
+- `createSession` accepts an optional `activeClient` so the creating client can claim the active role atomically (equivalent to dispatching `session/activeClientSet` right after creation).
+
+If multiple clients advertise the same tool, the host MAY dedupe, preferring the client that started the turn.
+
 ## Version negotiation
 
 Handshake is SemVer-based. The client sends `InitializeParams.protocolVersions: string[]` ordered from most preferred to least preferred; the server selects one and returns it as `InitializeResult.protocolVersion`. The generated `state/protocol/version/registry.ts` owns `PROTOCOL_VERSION` plus exhaustive introduced-in maps for actions and notifications.
@@ -80,25 +136,41 @@ When a client must feature-detect server support, prefer adding an explicit gene
 
 The legacy local `sessionCapabilities.ts` helper was removed when generated SemVer negotiation landed. New feature gates should be added to the protocol source/registry in the sibling repo and regenerated here, not reintroduced as a VS Code-only numeric capability table.
 
+## Error model
+
+Errors are JSON-RPC errors with a typed, structured shape (`Agent host rich error handling`). `protocol/errors.ts` (re-exporting `common/errors.ts`) defines:
+
+- `JsonRpcErrorCodes` — the standard JSON-RPC 2.0 codes (`ParseError` -32700 … `InternalError` -32603).
+- `AhpErrorCodes` — AHP-specific codes: `SessionNotFound` (-32001), `ProviderNotFound` (-32002), `SessionAlreadyExists` (-32003), `TurnInProgress` (-32004), `UnsupportedProtocolVersion` (-32005), `ContentNotFound` (-32006), `AuthRequired` (-32007), `NotFound` (-32008), `PermissionDenied` (-32009), `AlreadyExists` (-32010), `Conflict` (-32011).
+- Structured `data` payloads: `AuthRequiredErrorData { resources: ProtectedResourceMetadata[] }` (required when `AuthRequired`), `PermissionDeniedErrorData { request?: ResourceRequestParams }`, `UnsupportedProtocolVersionErrorData { supportedVersions: string[] }`.
+
+The "rich" part is the type machinery: `AhpError<C extends AhpErrorCode>` is a distributive conditional type, and `AhpErrorDetailsMap` maps each code that carries structured data to its data type. Narrowing on `code` reveals the precise `data` type (required for codes in the map, optional otherwise). When adding a new error condition, add the code to the protocol source and, if it carries structured data, an entry in `AhpErrorDetailsMap` — don't smuggle structured failure detail through the free-form `message`.
+
+`sessionProtocol.ts` re-exports these and keeps a few backward-compat numeric constants (`AHP_SESSION_NOT_FOUND = -32001`, `AHP_AUTH_REQUIRED = -32007`, …) for call sites that haven't migrated to the named codes.
+
 ## Important types
 
 - `RootState` — advertised agents, models, protected resources, customizations, active session count, terminals, host-level `config?: RootConfigState`.
 - `RootConfigState` — host-level configuration (schema + values), the host-wide counterpart of per-session `SessionConfigState`. Surfaced in the workbench by the host-settings synthetic-file editor (see [agent-host-sessions-providers](./agent-host-sessions-providers.md#settings-editor-file-system-providers)).
-- `SessionState` — full session state: summary, lifecycle, turns, active turn, server tools, active client, pending/queued messages, input requests, config, customizations.
-- `SessionStatus` — bit-flag enum on `SessionSummary.status` (replacing the older `isRead` / `isDone` booleans). Includes activity bits (`Idle`, `InProgress`, `InputNeeded`, `Error`) and persistent flags `IsRead` / `IsArchived`.
-- `SessionSummary` / `AgentSessionMetadata` — lightweight list metadata. **Do not assume full `SessionState` fields are available in list APIs** — list endpoints return summaries, not full state.
+- `SessionState` — full session state: summary, lifecycle, the `chats` catalog and `defaultChat`, `activeClients`, server tools, customizations, changeset catalogue, config. The conversation itself is **not** here — it lives on `ChatState` (chat channel).
+- `ChatState` / `ChatSummary` — per-chat conversation state and its lightweight catalog entry. See [Multi-chat sessions](#multi-chat-sessions). `ChatOrigin` / `ChatInteractivity` describe how a chat was created and how interactive it is.
+- `SessionStatus` — bit-flag enum on `SessionSummary.status` (replacing the older `isRead` / `isDone` booleans). Includes activity bits (`Idle`, `InProgress`, `InputNeeded`, `Error`) and persistent flags `IsRead` / `IsArchived`. `ChatSummary.status` reuses the same bitset.
+- `SessionSummary` / `AgentSessionMetadata` — lightweight list metadata. **Do not assume full `SessionState` fields are available in list APIs** — list endpoints return summaries, not full state. For multi-chat sessions, summary fields are aggregated from the chat catalog (see the compat-layer rules above). `SessionSummary.annotations?: AnnotationsSummary` surfaces annotation counts without subscribing to the annotations channel.
 - `ConfirmationOption` / `ConfirmationOptionKind` — server-provided confirmation choices on tool-call confirmation actions/state. When set, the client renders these instead of plain approve/deny and echoes back `selectedOptionId` on the answer action. Used to express richer permission choices (e.g. "Allow Once" / "Allow in this Session").
-- `SessionActiveClient` — the currently active client for a session, including the client's tools and customizations. `createSession` now accepts an optional `activeClient` param so the creating client can claim the session atomically (no separate post-create `ActiveClientChanged` round-trip).
+- `SessionActiveClient` — an entry in `SessionState.activeClients[]`, including the client's `tools` and `customizations`. See [Multiple active clients per session](#multiple-active-clients-per-session).
+- `Changeset` / `ChangesetState` / `ChangesetOperation` (changeset channel) — server-declared file-change catalogs and invokable operations (stage / revert / create-pr / …). See [agent-host-git-driven-diffs](./agent-host-git-driven-diffs.md).
+- `AnnotationsState` / `Annotation` / `AnnotationEntry` (annotations channel) — file-anchored conversations keyed under `<sessionUri>/annotations`. Used for agent feedback / PR-review comments; feedback semantics ride `Annotation._meta` (`FEEDBACK_ANNOTATION_META_KEY`). See [agent-host-sessions-providers](./agent-host-sessions-providers.md).
 - `ActionEnvelope` — server-applied action plus server sequence and optional client origin.
 - `AgentSession.provider` / `id` / `uri` — helpers for canonical backend session URIs.
 - `InitializeParams.locale` — BCP 47 locale the client passes during `initialize`, so the server can localize confirmation labels and other server-emitted strings.
 - `InitializeParams.protocolVersions` / `InitializeResult.protocolVersion` — SemVer negotiation for the connection. Unsupported combinations fail with `UnsupportedProtocolVersion` (-32005) rather than a partial initialize.
 - Session config values are typed `Record<string, unknown>` (widened from `Record<string, string>`); `SessionConfigChanged` carries an optional `replace?: boolean` to distinguish merge vs full replacement.
-- `SessionState._meta?: Record<string, unknown>` — generic well-known-keyed metadata slot, dispatched by `SessionMetaChanged` and applied by `setSessionMeta` server-side. Used today for the `git` slot (`SESSION_META_GIT_KEY`, with `ISessionGitState` shape and `readSessionGitState` / `withSessionGitState` helpers in `sessionState.ts`) so server-computed git state can ride along with normal session-state subscriptions instead of needing a bespoke command. Add new well-known keys here rather than expanding the typed `SessionState` surface when a field is conceptually optional, server-computed, and well-known by string key.
+- `SessionState._meta?: Record<string, unknown>` — generic well-known-keyed metadata slot, dispatched by `SessionMetaChanged` and applied by `setSessionMeta` server-side. Today's keys: `git` (`SESSION_META_GIT_KEY`, `ISessionGitState` shape — `hasGitHubRemote` / `branchName` / `baseBranchName` / …, with `readSessionGitState` / `withSessionGitState` helpers) so server-computed git state rides along with normal session-state subscriptions. The related **GitHub** slot lives one level up on `SessionSummary._meta` (`SESSION_META_GITHUB_KEY` = `github`, `ISessionGitHubState { owner; repo; pullRequestUrl }`) so list APIs can show a PR badge without subscribing to full state. Add new well-known keys here rather than expanding the typed surface when a field is conceptually optional, server-computed, and well-known by string key.
 - `resourceRequest` / `PermissionDenied` — bidirectional permission negotiation for resource access. A failed resource command may throw `PermissionDenied` (-32009) with `PermissionDeniedErrorData.request`; the caller can then issue `resourceRequest` with that payload and retry if granted.
 - `sessionConfigCompletions` and `completions` — generated commands for dynamic config enums and chat-input completions. `InitializeResult.completionTriggerCharacters` tells clients which typed characters should trigger user-message completion requests; completion items may surface commands, skills, and attachment-backed references without introducing client-only inference.
 - `SessionInputRequest` plus `SessionInputRequested` / answer / completion actions — generic state for agent-originated user-input requests such as MCP elicitation forms or URL affordances. Providers translate SDK-specific prompts into this protocol shape; clients render and answer it through normal session state.
-- `SessionModelInfo._meta` — provider-supplied model metadata bag. Pricing/multiplier data now travels through this generic slot rather than growing a Copilot-specific wire field.
+- `UsageInfo` / `UsageInfoMeta` — per-turn token accounting (`inputTokens`, `outputTokens`, `cacheReadTokens`, `model`, `_meta`). Cost, quota, and Copilot-AIU data are **not** first-class wire fields — they ride `UsageInfo._meta` (`UsageInfoMeta { cost?; copilotUsage?.totalNanoAiu; quotaSnapshots? }`, read via `readUsageInfoMeta` / `readAccountQuotaSnapshot` in `sessionState.ts`).
+- `SessionModelInfo._meta` — provider-supplied model metadata bag. Model **pricing** travels here under the well-known `pricing` key (the platform-level `agentModelPricing.ts`: `IAgentModelPricingMeta`, `readAgentModelPricingMeta`, `createPricingMetaFromBilling`, `ICAPIModelBilling`) rather than a Copilot-specific wire field; `agentHostLanguageModelProvider.ts` maps it onto `ILanguageModelChatMetadata` so the chat UI can show multiplier/cost. This **resolves** the long-standing "`SessionModelInfo` has no multiplier/pricing field" debt previously tracked in [agent-host-session-handler](./agent-host-session-handler.md).
 
 ## Where to edit
 
@@ -127,6 +199,8 @@ The legacy local `sessionCapabilities.ts` helper was removed when generated SemV
 - **gotcha** (2026-04-20, AHP authentication contract — `protectedResources.required: true`) — agents whose `protectedResources` declare `required: true` (default) MUST throw `AHP_AUTH_REQUIRED` (-32007) for any command issued before authentication, NOT return empty results. The provider-side temptation is to return `[]` from `listSessions` / model list etc. when no token; that silently breaks one-shot caches in the consumer and causes hard-to-trace UI bugs (sidebar shows nothing forever until something else forces a refresh). See `changes/2026-04-20-fix-initial-session-list-display/` and the concrete rule in `copilot-agent-provider.md`.
 
 ## Changelog
+
+- **2026-06-25** — 09c18fe5c5 — reconciliation: major rewrite for the **channel-based wire model** (`protocol/` now splits into `channels-root/-session/-chat/-terminal/-annotations/-changeset/-resource-watch/-otlp` + `common/` + `version/`, with top-level `state.ts` as re-export glue; `state/AGENTS.md` governs and `protocol/` is generated). Added **Multi-chat sessions** (`SessionState.chats` / `defaultChat`, `ChatSummary` / `ChatState` / `ChatOrigin` / `ChatInteractivity`, `createChat` / `disposeChat`, fork via `ChatForkSource`, session-channel catalog actions, and the default-chat `SessionSummary` aggregation compat layer). Added **Multiple active clients per session** (`SessionState.activeClients`, `SessionActiveClient*` actions — modeled as state, no service). Added the **Error model** section (`AhpErrorCodes` -32001..-32011, `AhpError<C>` distributive type, `AhpErrorDetailsMap`, structured `data`). Documented `UsageInfo` / `UsageInfoMeta` cost/quota-on-`_meta`, the **resolved** `SessionModelInfo._meta` pricing slot (`agentModelPricing.ts`), the `SessionSummary._meta.github` slot, and `SessionSummary.annotations`.
 
 - **2026-05-15** — 12443ea83d — reconciliation: documented generated completions, user-input request state, and generic model metadata after `5788cd3ebf8`, `5af88b2d0b5`, `d07965642c9`, and the later elicitation plumbing consumed by providers.
 

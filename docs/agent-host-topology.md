@@ -34,9 +34,17 @@ The sibling [`agent-host-protocol`](https://github.com/microsoft/agent-host-prot
 - **ACP** (Agent Client Protocol) is a 1:1 communication protocol between a single client and a single agent.
 - **AHP** is a coordination layer for **N clients sharing a host that hosts agents**. The host is the source of truth; clients reconcile.
 
-They compose: an AHP host *could* speak ACP downstream to agents. We don't do that today — our in-tree first-party Copilot and Claude providers sit side by side as in-process `IAgent` implementations using vendor SDKs directly. The host/agent layering is **collapsed in-process by design** for first-party agents.
+They compose: an AHP host *could* speak ACP downstream to agents. We don't do that today — our in-tree first-party providers sit side by side as in-process `IAgent` implementations using vendor SDKs directly. There are now **three**:
 
-A future ACP bridge — `class AcpAgent implements IAgent` — is reserved for *external* agents that already speak ACP. It is not the eventual home for our own agents. New first-party agents follow the `CopilotAgent` shape.
+| `IAgent` impl | Enablement | Backend |
+|---|---|---|
+| `CopilotAgent` (`node/copilot/`) | always registered | Copilot SDK |
+| `ClaudeAgent` (`node/claude/`) | `chat.agentHost.claudeAgent.enabled`, default **ON** | Anthropic SDK; `ClaudeTransport` routes through the Copilot proxy or native BYOK (`useCopilotProxy`) |
+| `CodexAgent` (`node/codex/`) | `chat.agentHost.codexAgent.enabled`, default **OFF** | Codex `app-server` child process over JSON-RPC / NDJSON |
+
+`AgentService.registerProvider` keys agents by `providerId` with a `_defaultProvider` fallback; all three are wired up in both `agentHostMain.ts` and `agentHostServerMain.ts`. The host/agent layering is **collapsed in-process by design** for these first-party agents.
+
+A future ACP bridge — `class AcpAgent implements IAgent` — is reserved for *external* agents that already speak ACP. It is not the eventual home for our own agents. New first-party agents follow the `CopilotAgent` / `ClaudeAgent` / `CodexAgent` shape.
 
 ## 1. Protocol philosophy: AHP is generic by design
 
@@ -253,7 +261,7 @@ A handful of foundational facts about how the system actually behaves at runtime
 
 ### Persistence is split: agent owns chat data, host owns metadata
 
-The agent backend (Copilot SDK today, Claude SDK planned) **owns the actual session data** — the chat history, messages, agent working memory. That lives wherever the SDK stores it, and is durably written by the SDK at the moment it's generated.
+The agent backend (Copilot SDK, and now the Claude / Codex backends) **owns the actual session data** — the chat history, messages, agent working memory. That lives wherever the SDK stores it, and is durably written by the SDK at the moment it's generated.
 
 The agent host **owns an augmenting metadata layer** in per-session SQLite databases under the host's `userDataPath` (see `SessionDataService`). This layer holds things AHP-side that the SDK doesn't know about: custom titles, `isRead`/`isDone` flags, `configValues`, diffs, etc.
 
@@ -345,6 +353,8 @@ A short list of the values that drive design decisions in the agent host. When i
 - **gotcha** (2026-04-22, *RelayTransport.dispose) — relay-transport `dispose()` implementations are responsible for telling the shared-process side to close the underlying connection. `TunnelRelayTransport.dispose()` and `TunnelConnectionTransport.dispose()` both do this; `SSHRelayTransport.dispose()` historically did NOT (it only removed IPC listeners), which is why removing an SSH-backed remote leaked the tunnel until the SSH renderer started passing its own `transportDisposable` that calls `_mainService.disconnect(connectionId)`. If you add a new relay transport, make sure its `dispose()` either closes the shared-process connection itself or that the renderer that owns it passes a `transportDisposable` that does.
 
 ## Changelog
+
+- **2026-06-25** — 09c18fe5c5 — reconciliation: there are now **three** in-tree first-party `IAgent` implementations — added a table for `CopilotAgent` (always on), `ClaudeAgent` (`chat.agentHost.claudeAgent.enabled`, default ON; Anthropic SDK via Copilot proxy or native BYOK), and `CodexAgent` (`chat.agentHost.codexAgent.enabled`, default OFF; `app-server` child process over JSON-RPC/NDJSON), all registered via `AgentService.registerProvider` with a `_defaultProvider` fallback and wired in both server entry shells. Updated the persistence note (Claude/Codex backends now real, not "planned"). The protocol-philosophy and topology principles otherwise still hold; the channel-based wire model and multi-chat sessions are covered in [agent-host-protocol](./agent-host-protocol.md), and the sessions-services rename (`ISessionsProvidersService` / `ISessionsManagementService` / `ISessionsService` / `ISessionsPartService` / `ISessionGroupsService`) plus grouping / drag-reorder / multi-delete in [agent-host-sessions-providers](./agent-host-sessions-providers.md).
 
 - **2026-05-26** — `fd3be52b6c` — added decision-tree item for workbench settings (`chat.agentHost.*` and similar) registered in platform-level `*.config.contribution.ts` files, with side-effect imports co-located on the consumer (starter file for main/server). Added matching gotcha covering the per-process `IConfigurationRegistry`, the split between `agentHost.config.contribution.ts` (just `enabled`) and `agentHostStarter.config.contribution.ts` (the seven starter keys), why the remote server intentionally does not register `chat.agentHost.enabled`, and the fact that the agent host process itself does not read these via workbench `IConfigurationService`.
 

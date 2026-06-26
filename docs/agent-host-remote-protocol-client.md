@@ -99,6 +99,8 @@ The 2026-04-21 audit intentionally fixed only request lifecycle and structured e
 
 ## Changelog
 
+- **2026-06-25** — 09c18fe5c5 — reconciliation: the remote client's reverse-RPC, permission-gating, and root-config dispatch architecture still holds. It now also rides the channel-based wire model and multi-chat sessions (chat content arrives on the chat channel) and multiple active clients per session — see [agent-host-protocol](./agent-host-protocol.md). No change to the post-handshake telemetry-level dispatch behavior documented below.
+
 - **2026-05-16** — 73f8f98fef — documented the remote client's post-handshake root-config telemetry-level dispatch and why it uses the non-optimistic action path.
 
 - **2026-05-15** — 12443ea83d — reconciliation: documented soft reconnect/replay gating from `ca28b2066f2`, the reconnect-hang fix in `f91a396d242`, active AHP ping liveness from `90db24b194c`, and transport JSONL logging from `e85a8295788`; the older reconnect debt entry remains below as a cleanup candidate for explicit confirmation.

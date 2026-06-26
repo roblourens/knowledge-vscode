@@ -112,7 +112,13 @@ The tests use a fake provider and exercise the delegate in isolation. The common
 - **gotcha** (2026-05-15, agentHostSessionConfigPicker.ts:Claude permissionMode registration) — the dedicated Claude `permissionMode` picker is for running sessions in `ChatInputSecondary`; new sessions intentionally keep `permissionMode` in the generic `NewSessionRepositoryConfig` chip lane. Do not add a dedicated `Menus.NewSessionControl` Claude picker unless the new-chat toolbar layout is deliberately being redesigned.
 - **gotcha** (2026-05-15, agentHostPermissionPickerActionItem.ts:render) — an inapplicable running-session picker must hide its outer render container, not only the inner label element. `.chat-input-picker-item` carries toolbar min-width/layout participation, so inner-only hiding leaves an empty gap beside visible controls.
 
+## Setting rename and approval modes
+
+The session-default-configuration setting was renamed `chat.agentSessions.defaultConfiguration` → **`chat.defaultConfiguration`** (`ChatConfiguration.DefaultConfiguration`, shape `IChatDefaultConfiguration` with `mode` + `approvals`; old key deprecated/migrated in `chat.shared.contribution.ts`). The picker exposes the three modes — Interactive / Plan / **Autopilot** — and elevated permission changes confirm through `maybeConfirmElevatedPermissionLevel(...)` keyed on `ChatConfiguration.DefaultConfiguration`.
+
 ## Changelog
+
+- **2026-06-25** — 09c18fe5c5 — reconciliation: added a **Setting rename and approval modes** section (`chat.agentSessions.defaultConfiguration` → `chat.defaultConfiguration`, `IChatDefaultConfiguration` mode/approvals, the Autopilot mode, and `maybeConfirmElevatedPermissionLevel`). The well-known-`autoApprove`-enum recognition and two-picker architecture are unchanged.
 
 - **2026-05-15** — 12443ea83d — reconciliation: mechanical path audit refreshed the moved Copilot new-chat permission-picker path; the doc's covered Agent Host picker area had no additional post-baseline behavioral drift.
 

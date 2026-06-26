@@ -53,7 +53,13 @@ All callbacks handed to the Copilot SDK (`handlePermissionRequest`, `handleUserI
 - [copilot-sdk-shells](./copilot-sdk-shells.md) — shell-tool permission asymmetry.
 - [copilot-sdk-tool-display](./copilot-sdk-tool-display.md) — permission display rendering for shell/custom tools.
 
+## Approval modes
+
+New agent sessions start in one of three approval modes selected by the `chat.defaultConfiguration` setting (`ChatConfiguration.DefaultConfiguration`, shape `IChatDefaultConfiguration`): **Interactive** (step-by-step collaboration), **Plan** (plan first, execute when ready), and **Autopilot** (autonomously iterate from start to finish). The `approvals` sub-property selects the approval policy (Default Approvals = use the user's configured settings). Elevated-mode confirmation flows through `maybeConfirmElevatedPermissionLevel(...)` with `defaultSettingKey: ChatConfiguration.DefaultConfiguration`.
+
 ## Changelog
+
+- **2026-06-25** — 09c18fe5c5 — reconciliation: added an **Approval modes** section (Interactive / Plan / Autopilot via `chat.defaultConfiguration` / `ChatConfiguration.DefaultConfiguration` / `IChatDefaultConfiguration`, `approvals` sub-property, `maybeConfirmElevatedPermissionLevel`). The auto-approval, callback-error-logging, and subagent-routing contract is otherwise unchanged.
 
 - **2026-05-15** — 12443ea83d — reconciliation: no permission-contract prose changes. Elicitation, replay, and tool-display commits touched nearby Copilot session files, but the existing auto-approval, callback error logging, and subagent routing guidance remains current.
 

@@ -47,6 +47,8 @@ For the **`skill` tool**, Agent Host intentionally diverges from EH CLI parity. 
 
 ## Changelog
 
+- **2026-06-25** — 09c18fe5c5 — reconciliation: extension-host-parity framing still holds. `@github/copilot` is now pinned at `^1.0.65` (both root `package.json` and `extensions/copilot/package.json`). Automatic-instructions computation lives in the extension at `extensions/copilot/src/platform/promptFiles/node/automaticInstructionsCollector.ts` (the `ComputeAutomaticInstructions` logic now resides in the extension), a reference point for the agent-host side's still-thinner request-context parity.
+
 - **2026-05-15** — 12443ea83d — reconciliation: refreshed the shared Agent Host real-SDK helper reference after `0d23db45a18`; archived/worktree, tool-call-event, model-detail, and CLI-agent-resolution commits keep the same extension-host parity framing.
 
 - **2026-05-04** — 939d3f227c — reconciliation: no body changes. `23589831dad` (`ChatSkill.disableModelInvocation`) and `ca5a6a94aca` (logging cleanup) are extension-host implementation details; Copilot Agent Host commits in the range (`fd6d37812b4`, `6bdca786907`, `8309b22051c`, `96e4e9e8c81`) are covered by provider/tool-display/session-provider docs and do not change the parity-gap framing here.

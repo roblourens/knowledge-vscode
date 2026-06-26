@@ -4,6 +4,8 @@ _Covers: src/vs/platform/agentHost/node/copilot/copilotAgent.ts, src/vs/platform
 
 `CopilotAgent` is the local Agent Host provider backed by the Copilot SDK. It is provider-specific code under `src/vs/platform/agentHost/node/copilot/`, below the generic AHP server layer and above the SDK runtime. Generic aggregation (`AgentService`) and UI consumers should receive already-filtered Copilot session metadata from this provider.
 
+> `CopilotAgent` is no longer the only in-tree `IAgent`. `ClaudeAgent` (`node/claude/`) and `CodexAgent` (`node/codex/`) are now siblings registered alongside it via `AgentService.registerProvider`. This doc remains Copilot-specific; for the multi-agent picture see [agent-host-topology](./agent-host-topology.md#ahp-vs-acp--different-problems-on-different-axes).
+
 This doc covers provider lifecycle, metadata, ownership, authentication, session announcements, and provider-level tests. Provider-adjacent SDK details are split by concern:
 
 - [copilot-extension-host-cli](./copilot-extension-host-cli.md) - extension-host Copilot CLI reference points and parity gaps for selfhosting.
@@ -16,7 +18,7 @@ This doc covers provider lifecycle, metadata, ownership, authentication, session
 `CopilotAgent` owns:
 
 - Starting and stopping the SDK `CopilotClient`, including the clean subprocess environment used for the CLI server.
-- Advertising Copilot models and protected resources.
+- Advertising Copilot models and protected resources. Model **pricing/billing** (`ICAPIModelBilling`) is mapped to AHP via `createPricingMetaFromBilling` and published on `SessionModelInfo._meta` under the `pricing` key (the platform-level `agentModelPricing.ts`), so the handler can show per-model multiplier/cost badges. Per-turn **cost / quota / Copilot-AIU** ride `UsageInfo._meta` (`UsageInfoMeta` — `cost`, `copilotUsage.totalNanoAiu`, `quotaSnapshots`). See [agent-host-session-handler § Cost and usage aggregation](./agent-host-session-handler.md#cost-and-usage-aggregation).
 - Creating, forking, resuming, listing, disposing, aborting, truncating, and changing model selection for Copilot sessions.
 - Building SDK session config from active client tools, customizations, hooks, MCP servers, custom agents, skills, and shell tools.
 - Publishing host/session customization refs, resolving session-config completions such as branch candidates, and registering slash-command completion support for composing Agent Host prompts.
@@ -173,6 +175,8 @@ Run via `npm run test-node -- --grep <pattern>`. Do not use `scripts/test.sh` fo
 - [copilot-sdk-tool-display](./copilot-sdk-tool-display.md) - SDK tool display and command rewriting.
 
 ## Changelog
+
+- **2026-06-25** — 09c18fe5c5 — reconciliation: noted that `CopilotAgent` is now one of three sibling in-tree `IAgent`s (`ClaudeAgent` / `CodexAgent`); documented model pricing/billing propagation (`ICAPIModelBilling` → `createPricingMetaFromBilling` → `SessionModelInfo._meta.pricing` via `agentModelPricing.ts`) and per-turn cost/quota/AIU on `UsageInfo._meta`, cross-linking [agent-host-session-handler § Cost and usage aggregation](./agent-host-session-handler.md#cost-and-usage-aggregation).
 
 - **2026-05-28** — dced3b17d10 — bumped `@github/copilot-sdk` `1.0.0-beta.4` → `1.0.0-beta.8` and CLI `@github/copilot` `1.0.49` → `1.0.55-3` (both root + `remote/`). Reworded the 2026-04-21 "track `extensions/copilot/package.json`" gotcha to note that an SDK peer-dep bump can force the CLI ahead of the extension's pin (the exception applied here: SDK beta.8 required CLI `^1.0.55-1` while the extension was still at `1.0.49`). Added new gotcha on `build/linux/debian/dep-lists.ts`: the CLI's `prebuilds/linux-x64/runtime.node` (Bun isolate) introduced `GLIBC_2.15`, so the amd64 entry needed `libc6 (>= 2.14)` → `(>= 2.15)` to clear the strict `FAIL_BUILD_FOR_NEW_DEPENDENCIES` allowlist in the Azure DevOps deb-prepare step (no impact on overall package floor, which stays at `>= 2.28`). PR [#318683](https://github.com/microsoft/vscode/pull/318683); details in `changes/2026-05-28-bump-copilot-sdk-beta-8/summary.md`.
 

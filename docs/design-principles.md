@@ -55,6 +55,8 @@ Push back on protocol or API shapes that put a concept at the wrong layer, mirro
 
 ## Changelog
 
+- **2026-06-25** — 09c18fe5c5 — reconciliation: no principle changes. The channel-based AHP wire model, multi-chat sessions, multiple active clients, the rich error model, the three-agent (Copilot/Claude/Codex) topology, and the changeset/annotations services are all concrete applications of the existing ownership/layering/"neither side is VS Code" principles — no new cross-cutting principle introduced.
+
 - **2026-05-15** — 12443ea83d — reconciliation: no principle changes. Provider-folder moves (`a3d955d72ad`), Claude growth, transport liveness/reconnect, and customization discovery all apply the existing ownership/layering principles; refreshed path examples only.
 
 - **2026-05-04** — 939d3f227c — reconciliation: no principle changes. Protocol SemVer negotiation (`e1a89568eb2`), explicit filesystem permission negotiation (`c30ed7c4a51`), eager provisional session creation (`8309b22051c`), and mobile/remote UI polish all apply existing principles: fail explicitly for contract mismatches, keep resource truth at the owning side, and adapt VS Code UI without distorting AHP.
