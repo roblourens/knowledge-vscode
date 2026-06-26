@@ -100,7 +100,13 @@ The one **legitimate exception** is transitioning from `actionWidgetService.hide
 - **gotcha** (2026-04-26, manageRemoteAgentHosts.ts:buildItems) — the "Remote Agent Hosts" separator header shows items regardless of `connectionStatus` — including Offline/Connecting. Do NOT rename it to "Connected" without also filtering to `connectionStatus === 'Connected'`.
 - **gotcha** (2026-04-26, remoteAgentHostActions.ts:configureSSHHosts run + promptToConnectViaSSH) — back-button callbacks propagate via `commandService.executeCommand(id, onBack)`. The `Action2.run(accessor, onBack?)` receives the callback as the second arg. All actions in this module that can be invoked both directly (no back button) and from a parent picker (with back button) follow this pattern. Do not move to a service/context — the callback captures the parent picker's closure.
 
+## WSL-backed remote hosts
+
+Alongside SSH and tunnel transports, **WSL** is now a supported remote agent-host transport, contributed by `wslAgentHost.contribution.ts` (with `wslAgentHost.contribution.test.ts`). Reconnection logic shared across managed transports is centralized in `managedReconnectAgentHostContribution.ts`.
+
 ## Changelog
+
+- **2026-06-25** — 09c18fe5c5 — reconciliation: added a **WSL-backed remote hosts** section (`wslAgentHost.contribution.ts`, `managedReconnectAgentHostContribution.ts`). The inline-X / disconnect-intent UX rules for SSH and tunnel are unchanged.
 
 - **2026-05-25** — `69e5d4640d` — extended the inline-X gotcha to call out SSH (entry removal) alongside tunnel (persisted suppression); the X must go through the shared `removeRemoteHost(...)` → `provider.disconnect()` helper for both. Cross-links to the new [SSH-backed remote providers](./agent-host-sessions-providers.md#ssh-backed-remote-providers-disconnect-intent-is-removal) section.
 

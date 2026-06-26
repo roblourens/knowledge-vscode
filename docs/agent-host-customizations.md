@@ -18,6 +18,20 @@ The inputs still differ by origin:
 
 These are intentionally adjacent but not interchangeable: local discovery decides what the client syncs, while the shared item provider renders refs the host exposes. The provider also understands synthetic synced bundles: it expands them in-place instead of wrapping them in `agent-host://`, because the bundle filesystem lives on the client. The only piece that is still a reasonable extraction is the SKILL.md frontmatter helper (also independently reimplemented in `AgenticPromptsService.discoverBuiltinSkills`).
 
+## Customization taxonomy
+
+The protocol's `CustomizationType` enum has grown beyond plugins/files. Today it is `Plugin | Directory | Agent | Skill | Prompt | Rule | Hook | McpServer`. There is **no** `SessionCustomization` type — session-scoped customizations are just refs in `activeClient.customizations` / `SessionCustomizationsChanged`. `Plugin` and `Directory` are *container* types whose children are expanded by the item provider; `ClientPluginCustomization` carries a `nonce` for cache invalidation.
+
+`ICustomizationItemProvider` gained a `provideSourceFolders` method so a provider can report the folders backing its customizations (used by features that need the on-disk roots, not just expanded items).
+
+The standalone `IAgentHostCustomAgentsService` was **removed**; custom-agent handling was consolidated into `AgentCustomizationItemProvider` plus `IAgentHostCustomizationService`. `AgentHostModeSynchronizer` survives as the piece that keeps chat **modes** in sync. **Hooks** (`CustomizationType.Hook`) are deliberately excluded from prompt sync — they are not prompt-attachable customizations.
+
+## MCP servers as customizations
+
+MCP servers are modeled as `CustomizationType.McpServer` — there is **no** dedicated MCP channel. `McpServerCustomization` carries `{ enabled; state: McpServerState; channel?; mcpApp? }`, where `channel?` is an `mcp://` subscription URI. Default UI-host capabilities live in `protocol/mcpAppDefaults.ts` (`DEFAULT_MCP_APP_CAPABILITIES` / `AhpMcpUiHostCapabilities`). On the server side, `McpCustomizationController` (`node/` + shared) reflects the SDK's MCP inventory into customization state.
+
+Syncing the user's VS Code MCP configuration into the host goes through `agentHostLocalCustomizations.ts` plus `syncedCustomizationBundler.ts` (`SyncedCustomizationBundler` / `ISyncableMcpServer`); the host-side server-options surface is reachable via the `workbench.mcp.agentHostServerOptions` command.
+
 ## The skill-folder convention
 
 Skills are conventionally a folder named after the skill, containing a `SKILL.md` whose frontmatter holds the canonical `name` and `description`. Both providers must understand this convention, otherwise:
@@ -64,6 +78,8 @@ If you need decorations to survive reload for AH sessions, the pragmatic fix is 
 - **debt** (2026-04-28, AH chat session restore path) — AH-restored chat requests don't re-parse for slash commands, so skill decorations don't survive reload. Re-running `ChatRequestParser.parseChatRequest` when hydrating AH user messages from AHP state would fix this.
 
 ## Changelog
+
+- **2026-06-25** — 09c18fe5c5 — reconciliation: added a **Customization taxonomy** section (`CustomizationType` is now `Plugin | Directory | Agent | Skill | Prompt | Rule | Hook | McpServer`; no `SessionCustomization`; `Plugin`/`Directory` are containers; `ClientPluginCustomization.nonce`; new `ICustomizationItemProvider.provideSourceFolders`; `IAgentHostCustomAgentsService` removed and folded into `AgentCustomizationItemProvider` + `IAgentHostCustomizationService`; `AgentHostModeSynchronizer` survives; Hooks excluded from prompt sync). Added a **MCP servers as customizations** section (`CustomizationType.McpServer`, `McpServerCustomization`, `protocol/mcpAppDefaults.ts`, `McpCustomizationController`, `syncedCustomizationBundler.ts` / `SyncedCustomizationBundler` / `ISyncableMcpServer`, `workbench.mcp.agentHostServerOptions`).
 
 - **2026-05-15** — 12443ea83d — reconciliation: documented the shared `AgentCustomizationItemProvider`, synthetic synced-bundle expansion, and current remote provider paths after `fec57be8249`, `cb855bd361c`, and the Sessions provider move in `a3d955d72ad`.
 

@@ -4,6 +4,8 @@ _Covers: src/vs/platform/agentHost/node/agentHostTelemetryService.ts, src/vs/pla
 
 Agent Host owns a VS Code `ITelemetryService` inside the host process so server-side facts can be logged where they happen. This is product telemetry, not the OTel span pipeline used for SDK request tracing. Use `AgentHostOTelService` for trace/span instrumentation and this telemetry path only for GDPR-classified VS Code product events.
 
+> The OTel span pipeline now has a dedicated AHP transport: the **`channels-otlp`** channel (`ahp-otlp:` URI) carries OpenTelemetry log/trace/metric export over the protocol, so a remote host's spans reach the client without a side channel. That is distinct from the product-telemetry path this doc covers; see [agent-host-protocol § Where it lives](./agent-host-protocol.md#where-it-lives).
+
 ## Process bootstrap
 
 Both host entry shells create telemetry through `createAgentHostTelemetryService`:
@@ -60,7 +62,7 @@ Do not include prompt text, session URI, working directory, project URI/name, fi
 
 The IDs in this event are Agent Host protocol/runtime identifiers, not end-user pseudonymized identifiers. Classify them as `SystemMetaData` unless a future event truly carries a user pseudonymous identity. Also avoid reserved common telemetry property names such as `sessionId`; hygiene rejects them, and event-specific names such as `agentSessionId` are clearer.
 
-`activeClientId` is the current active client on `SessionState.activeClient`, not necessarily the client that originally dispatched the action. `AgentSideEffects.handleAction(...)` is intentionally not passed the action envelope origin.
+`activeClientId` is the current active client on `SessionState.activeClients` (a session can now have several — see [agent-host-protocol § Multiple active clients](./agent-host-protocol.md#multiple-active-clients-per-session)), not necessarily the client that originally dispatched the action. `AgentSideEffects.handleAction(...)` is intentionally not passed the action envelope origin.
 
 ## OSS/dev validation
 
@@ -73,5 +75,7 @@ OSS/dev builds without real product telemetry still exercise the send path throu
 - **gotcha** (2026-05-16, agentHostTelemetryReporter.ts:activeClientId) — `activeClientId` means the session's current active client at send time, not the dispatching client origin. Do not reinterpret it as "client that sent this message" unless the side-effects layer starts receiving action envelope origin explicitly.
 
 ## Changelog
+
+- **2026-06-25** — 09c18fe5c5 — reconciliation: noted the dedicated `channels-otlp` (`ahp-otlp:`) OTel-over-AHP transport (distinct from this doc's product-telemetry path) and updated the `activeClientId` reference to `SessionState.activeClients` (now plural). The product-telemetry bootstrap, disablement, and `agentHost.userMessageSent` event shape are unchanged.
 
 - **2026-05-16** — 73f8f98fef — initial entry after Agent Host product telemetry wiring and `agentHost.userMessageSent` landed in PR #316797.

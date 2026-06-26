@@ -40,4 +40,6 @@ Tests live alongside the production code:
 
 ## Changelog
 
+- **2026-06-25** — 09c18fe5c5 — reconciliation: no architectural changes — the three roles (discovery / dispatch registry / worktree-created auto-dispatch), the agent-host execution split, and the `chat.agentHost.runWorktreeCreatedTasks` gate all still hold against `origin/main`.
+
 - **2026-05-25** — faab40636a — initial doc; documents the three roles (discovery, dispatch registry, worktree-created auto-dispatch), the agent-host execution split, the `chat.agentHost.runWorktreeCreatedTasks` gate added in PR #318243, and the `_trackSession` early-bail gotcha that breaks dispatcher tests.

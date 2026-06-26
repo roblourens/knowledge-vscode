@@ -122,6 +122,8 @@ The extension-host Copilot CLI cannot do this synthesis — it only sees the `sk
 
 ## Changelog
 
+- **2026-06-25** — 09c18fe5c5 — reconciliation: the history/live/permission display paths and command-rewrite rules are unchanged. Subagent tool-call display now also carries a per-subagent cost hover (rendered in `chatSubagentContentPart.ts`); subagent metadata extraction (`agent_type` → `getSubagentMetadata`) still lives in `copilot/copilotToolDisplay.ts`. See [agent-host-session-handler § Cost and usage aggregation](./agent-host-session-handler.md#cost-and-usage-aggregation).
+
 - **2026-05-26** — e6e488e018 — exploratory bug bash on the Local Agent Host terminal tool surfaced two display-layer regressions in turn-scoped rendering: multi-command turn cards vanish after the turn completes, and cancelled-mid-run cards still read "Executed"/"Running". Both recorded as `debt:`; full enumeration in `changes/2026-05-26-agent-host-terminal-tool-bug-bash/`.
 
 - **2026-05-15** — 12443ea83d — reconciliation: documented provider-neutral tool input/output rendering from `bdb8a618815`; tool-name matching (`0d2147edf72`), apply-patch rendering, and replay fixes stay within the existing display-normalization model.

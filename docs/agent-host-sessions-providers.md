@@ -192,6 +192,34 @@ The well-known shape lives in `src/vs/platform/agentHost/common/state/sessionSta
 
 The Sessions app changes view consumes the resulting fields via `workspace.repositories[0]` in `changesViewModel.ts`. Note that the **agents-app main-window session list** (`agentSessionsService.getSession(uri).metadata`, populated by `AgentHostSessionListController._buildMetadata`) does NOT currently carry these git fields — only `remoteAgentHost` and `workingDirectoryPath`. See the corresponding debt entry below.
 
+## GitHub PR badges and the icon cache
+
+Sessions whose working directory has an associated pull request show a PR badge in the list. The state that drives this rides one level up from `_meta.git`: it lives on `SessionSummary._meta` under `SESSION_META_GITHUB_KEY` (`'github'`), shape `ISessionGitHubState { owner; repo; pullRequestUrl }`, so the list APIs can render a badge without subscribing to full `SessionState`. Server-side, `IAgentHostGitStateService` computes it (`refreshSessionGitState`, `setSessionGitHubState`, `attachSessionGitHubPullRequest`); the underlying GitHub/Octokit access goes through `IAgentHostOctoKitService` and PR title/description generation through `ICopilotApiService`.
+
+On the renderer, the Agents-app GitHub surface lives under `src/vs/sessions/contrib/github/`:
+
+- `githubService` — resolves PR metadata for a session.
+- `pullRequestIconCache` — a **persistent** cache (storage key `sessions.github.pullRequestIconCache`, capped at `MAX = 50` entries) so the PR badge renders immediately on reload instead of flashing while the network resolves.
+- `pullRequestIconStatus` — the open/merged/closed status that selects the icon.
+
+`providers/agentHost/browser/sessionGitHubInfo.ts` adapts the agent-host session's `_meta.github` into the shape this surface consumes. The PR / commit / sync / discard *operations* themselves are changeset operations — see [agent-host-git-driven-diffs](./agent-host-git-driven-diffs.md#changeset-channel--service-decomposition).
+
+## Workspace trust
+
+Eager backend session creation (`NewSession.eagerCreate`, the one-shot cache load) is gated on workspace trust. `BaseAgentHostSessionsProvider` carries `requiresWorkspaceTrust` and a `getUriTrustInfo(uri)` helper; for an untrusted folder it **skips the eager `createSession`** so an agent doesn't start running against code the user hasn't trusted. The session is created normally once trust is granted (or once the user explicitly proceeds).
+
+## Multi-chat in the provider
+
+With [multi-chat sessions](./agent-host-protocol.md#multi-chat-sessions), a single `ISession` can contain several chats. The provider exposes "new chat" / "fork" affordances that issue `createChat` (optionally with a `ChatForkSource`) against the session's connection, and the adapter aggregates the chat catalog into the single `SessionSummary` the list row renders (status/activity/`modifiedAt` rolled up per the default-chat compat rules). Per-chat overrides (`model` / `agent`) are not aggregated up to the session row.
+
+## Multi-session delete
+
+Deletion is now a generic capability rather than an agent-host-only action. `ISessionsProvider.deleteSessions(...)` (plural) plus `ISessionCapabilities.supportsDelete` let the single core `DeleteSessionAction` operate on one or many selected sessions across any provider that opts in. Agent-host providers implement `deleteSessions` by disposing the backend sessions and pruning their metadata DBs.
+
+## Setting rename: `chat.defaultConfiguration`
+
+The session-default-configuration setting was renamed from `chat.agentSessions.defaultConfiguration` to **`chat.defaultConfiguration`** (`ChatConfiguration.DefaultConfiguration` in `constants.ts`). The old key is deprecated and migrated in `chat.shared.contribution.ts`. No other `chat.agentHost.*` keys were renamed in this window.
+
 ## Tunnel-backed remote providers
 
 Tunnel-backed remotes are surfaced by `TunnelAgentHostContribution`, not by the generic `RemoteAgentHostContribution`. The tunnel service owns the cached tunnel list and the persisted auto-connect suppression list:
@@ -256,6 +284,8 @@ The ordering and the helper-call shape are exercised by `disconnectSSHEntry` in 
 - **debt** (2026-04-25, agentService.ts:_attachGitState + agentHostGitService.ts) — `IAgentHostGitService.getSessionGitState` shells out to `git` from the agent host process for every session create / restore / subscribe-without-meta / turn-complete. `_attachGitState` dedupes via `equals(currentGitState, newGitState)` so no-op recomputations don't dispatch actions, but the git probes themselves still run. Turn-complete cadence is fine for now (one probe per turn), but if more well-known `_meta` keys grow similar lifecycles consider a shared per-session probe scheduler instead of one-shot lazy probes per key.
 
 ## Changelog
+
+- **2026-06-25** — 09c18fe5c5 — reconciliation: added **GitHub PR badges and the icon cache** (`SessionSummary._meta.github` / `ISessionGitHubState`, `IAgentHostGitStateService`, `IAgentHostOctoKitService`, `ICopilotApiService`, the persistent `pullRequestIconCache` under `sessions/contrib/github/` with storage key `sessions.github.pullRequestIconCache` / MAX 50, and `sessionGitHubInfo.ts`); **Workspace trust** (`requiresWorkspaceTrust` / `getUriTrustInfo`, eager `createSession` skipped for untrusted folders); **Multi-chat in the provider** (new-chat / fork via `createChat` + `ChatForkSource`, chat-catalog aggregation into one `SessionSummary`); **Multi-session delete** (`ISessionsProvider.deleteSessions` + `ISessionCapabilities.supportsDelete`, single core `DeleteSessionAction`); and the **`chat.defaultConfiguration`** setting rename (from `chat.agentSessions.defaultConfiguration`, migrated in `chat.shared.contribution.ts`). The sessions-service layering rename and grouping/drag-reorder are tracked in [agent-host-topology](./agent-host-topology.md).
 
 - **2026-05-25** — `69e5d4640d` — documented SSH-backed `_disconnectOnDemand` semantics: SSH disconnect intent is entry removal (no persisted suppression), `removeRemoteAgentHost` must run before `_sshService.disconnect` because the SSH service fires `onDidChangeConnections` synchronously and the contribution's `_reconcile` immediately auto-reconnects. Regression in PR #316810, fix in PR [#318262](https://github.com/microsoft/vscode/pull/318262).
 

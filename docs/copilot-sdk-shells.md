@@ -34,7 +34,13 @@ For bash/zsh, command lines written via `executeCommandWithShellIntegration` and
 - [copilot-sdk-permissions](./copilot-sdk-permissions.md) — permission callback behavior outside shell tools.
 - [copilot-sdk-tool-display](./copilot-sdk-tool-display.md) — shell command display rewriting and permission display.
 
+## Sandboxed shell execution
+
+Managed shell tools can now run inside a **sandbox**. The engine lives in `agentHostSandboxEngine.ts` (`AgentHostSandboxEngine`, `createAgentHostSandboxEngine`), built on the shared `TerminalSandboxEngine` / `ISandboxHelperService`, with config via `AgentHostSandboxConfigKey` / `sandboxConfigSchema` (`sandboxSettingIdToAgentHostKey`) and SDK wiring in `sandboxConfigForSdk.ts`. The earlier `autoApproveUnsandboxed` config field was **removed** — auto-approval no longer keys off a sandbox boolean; sandboxing is now its own per-session config surface.
+
 ## Changelog
+
+- **2026-06-25** — 09c18fe5c5 — reconciliation: added a **Sandboxed shell execution** section (`agentHostSandboxEngine.ts` / `AgentHostSandboxEngine` / `createAgentHostSandboxEngine` on the shared `TerminalSandboxEngine` / `ISandboxHelperService`; `AgentHostSandboxConfigKey` / `sandboxConfigSchema` / `sandboxConfigForSdk.ts`); the `autoApproveUnsandboxed` field was removed. Managed-shell-tool and shell-history-suppression prose is otherwise unchanged.
 
 - **2026-05-26** — e6e488e018 — bug bash recorded that ANSI color/SGR escape codes in terminal-tool output are stripped before reaching the chat UI or the model. Noted as a gotcha; see `changes/2026-05-26-agent-host-terminal-tool-bug-bash/`.
 

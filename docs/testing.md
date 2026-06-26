@@ -151,6 +151,8 @@ Three coordination details bite if missed (each surfaced in the 2026-05-26 termi
 
 ## Changelog
 
+- **2026-06-25** — 09c18fe5c5 — reconciliation: the four test layers still hold. Recorded that two new in-tree agents brought substantial harness suites — Claude under `src/vs/platform/agentHost/test/node/claude*.test.ts` (+ `clientTools/claude*`) and Codex under `src/vs/platform/agentHost/test/node/codex/` — mirroring the Copilot provider test shape (unit + integration + real-SDK helpers).
+
 - **2026-05-28** — dced3b17d10 — added gotcha that the deb auto-deps allowlist check (`vscode-linux-x64-prepare-deb`) only runs on Azure DevOps, not GitHub Actions PR CI, so a clean `gh pr checks` can still hide a deb-prepare failure. Discovered when the `@github/copilot` 1.0.49 → 1.0.55-3 bump in PR [#318683](https://github.com/microsoft/vscode/pull/318683) shipped a new `runtime.node` with `GLIBC_2.15` symbols, requiring a one-line `dep-lists.ts` bump that surfaced ~16h after the PR went green. Included an `objdump -T | grep GLIBC_` diagnostic recipe and a note on AzDo log access friction. See `changes/2026-05-28-bump-copilot-sdk-beta-8/summary.md`.
 
 - **2026-05-26** — e6e488e018 — added "Exploratory UI testing via the launch skill" section after the four automated layers. Documents the launch skill as the canonical bug-bash surface and the three coordination details that bite if missed: `files.simpleDialog.enable`, `-s=$PW_SESSION` on every CLI call, and the macOS Mach-ports cap on concurrent instances. See `changes/2026-05-26-agent-host-terminal-tool-bug-bash/`.

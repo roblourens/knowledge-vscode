@@ -4,6 +4,35 @@ _Covers: src/vs/platform/agentHost/node/agentHostGitService.ts, src/vs/platform/
 
 The "Branch changes" mode in the agents-app Changes view shows which files the agent modified since the session started. This is driven by `git diff` rather than by tracking individual editor saves, so it catches changes made via terminal commands, external tools, or any other mechanism.
 
+> **Newer model: the changeset channel.** The raw `computeSessionFileDiffs` path below is now the lowest layer underneath a **protocolized changeset channel** (`agentHost: changeset operations channel` and the surrounding service split). Diffs are no longer just a renderer-computed list — they are a server-declared catalog of `Changeset`s, each with subscribable `ChangesetState` and invokable `ChangesetOperation`s. See [Changeset channel & service decomposition](#changeset-channel--service-decomposition) for the current shape; the `AgentHostGitService` / `git-blob:` machinery documented in detail below is what those services sit on top of.
+
+## Changeset channel & service decomposition
+
+The single `agentHostGitService` has been decomposed into a set of focused services (common interfaces + `node/` implementations under `src/vs/platform/agentHost/`):
+
+| Service | Responsibility |
+|---|---|
+| `IAgentHostGitService` | raw git plumbing (diff, `git show`, temp-index, blob resolution) — the layer this doc's lower half describes |
+| `IAgentHostGitStateService` | computes `ISessionGitState` / `ISessionGitHubState` and publishes them onto session `_meta` (see [agent-host-protocol](./agent-host-protocol.md)) |
+| `IAgentHostChangesetService` | owns the `Changeset` catalogue + `ChangesetState` for a session |
+| `IAgentHostChangesetOperationService` | registers and dispatches `ChangesetOperation`s (stage / revert / create-pr / commit / sync / discard) |
+| `IAgentHostChangesetSubscriptionService` | wires changeset state into the AHP subscription/notification flow |
+| `AgentHostChangesetCoordinator` / `AgentHostChangesetStateCache` / `ChangesetFileMonitorCoordinator` | orchestration, caching, and file-system watching that keeps changeset state live |
+| `IAgentHostCheckpointService` | per-turn git checkpoints (see below) |
+
+**Changeset channel wire shape** (`channels-changeset`, addressed `<sessionUri>/changeset/<id>`):
+
+- `Changeset { label; uriTemplate; changeKind }` where `changeKind` ∈ `session | branch | uncommitted | turn | compare-turns` — the different "what am I diffing against" modes (whole-session, base-branch, working-tree, a single turn, or two turns).
+- `ChangesetState { status; files: ChangesetFile[]; operations?: ChangesetOperation[] }`.
+- `ChangesetOperation { id; label; scopes; confirmation?; group?; status }` — a server-declared, client-invokable action (stage, revert, create-pr, …). Clients invoke them via the `invokeChangesetOperation` command rather than hard-coding git buttons in the UI.
+- Seven state actions: `ChangesetStatusChanged`, `ChangesetFileSet`, `ChangesetFileRemoved`, `ChangesetContentChanged`, `ChangesetOperationsChanged`, `ChangesetOperationStatusChanged`, `ChangesetCleared`.
+
+**Operations** are handled by dedicated handlers (PR / commit / sync / discard). The PR handler in particular (`AgentHostPullRequestOperationProvider` / `AgentHostPullRequestOperationHandler`, `IAgentHostOctoKitService`) is shared with the GitHub/PR surface documented in [agent-host-sessions-providers](./agent-host-sessions-providers.md).
+
+**Checkpoints** (`IAgentHostCheckpointService`). The server captures a git checkpoint per turn under `refs/agents/<sid>/checkpoints/turn/<N>` (`captureBaseline`, `captureTurnCheckpoint`, `getTurnCheckpointPair`). These capture the **full worktree delta including terminal-driven edits**, which is what makes per-turn (`changeKind: turn`) and turn-to-turn (`compare-turns`) diffs possible — they compare checkpoint refs rather than recomputing from the base branch each time.
+
+UI surfaces: `agentHostDiffs.ts` (diff → changes conversion, below) and `agentHostSessionChangesets.ts` (changeset catalogue rendering in the agents app).
+
 ## How it works end-to-end
 
 1. **Anchor point** — When `CopilotAgent` creates or resumes a session it writes `META_DIFF_BASE_BRANCH` (`'agentHost.diffBaseBranch'`) into the per-session database. The value is the name of the branch from which the worktree was forked (e.g. `main`). `AgentSideEffects._computeGitDrivenDiffs` reads it back at turn-end.
@@ -61,6 +90,8 @@ git-blob://<hex(sessionUri)>/<urlencode(sha)>/<hex(repoRelativePath)>/<basename>
 - **debt** (2026-04-26, agentSideEffects.ts:_computeGitDrivenDiffs) — the git-driven diff path in `AgentSideEffects` falls back silently to no-op when `META_DIFF_BASE_BRANCH` is absent from the DB. This means sessions created before the key was introduced (or sessions for non-worktree repos) simply show no branch-changes diffs without any indication why. A future improvement would be to fall back to a `getDefaultBranch()` call when the key is absent, rather than skipping the diff entirely.
 
 ## Changelog
+
+- **2026-06-25** — 09c18fe5c5 — reconciliation: added the **Changeset channel & service decomposition** section. The monolithic `agentHostGitService` was split into `IAgentHostGitService` / `IAgentHostGitStateService` / `IAgentHostChangesetService` / `IAgentHostChangesetOperationService` / `IAgentHostChangesetSubscriptionService` + `AgentHostChangesetCoordinator` / `StateCache` / `ChangesetFileMonitorCoordinator` / `IAgentHostCheckpointService`. Documented the `channels-changeset` wire shape (`Changeset.changeKind` session/branch/uncommitted/turn/compare-turns, `ChangesetState`, `ChangesetOperation`, the seven changeset actions, `invokeChangesetOperation`), per-turn checkpoints under `refs/agents/<sid>/checkpoints/turn/<N>`, the PR/commit/sync/discard operation handlers, and `agentHostSessionChangesets.ts`. The lower-level `git-blob:` / temp-index machinery is unchanged.
 
 - **2026-05-15** — 12443ea83d — reconciliation: documented worktree/base-branch diff repair from `e1615a45e22` and `514255bd1ea`, and updated the Sessions provider path after `a3d955d72ad`.
 
