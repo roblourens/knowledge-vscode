@@ -51,6 +51,8 @@ The session workspace picker (`sessionWorkspacePicker.ts`) shows remote host row
 
 Inline remove must use the same `removeRemoteHost(...)` helper as the per-remote options picker. Calling `IRemoteAgentHostService.removeRemoteAgentHost(address)` directly bypasses tunnel-owned disconnect state (including persisted auto-connect suppression), so the X button and "Remove Remote" diverge. The shared ActionList `onRemove` callback is async-aware; await the provider removal before removing the row locally so failures and provider refresh ordering don't get hidden by the UI.
 
+`WorkspacePicker` (the base class behind `sessionWorkspacePicker.ts`) gained a `renderTrigger(container)` method that mirrors the same picker instance into multiple trigger surfaces (each trigger independent, sharing selection state), in addition to the original single-trigger `render(container)`. This was added for the new Automations feature to reuse the workspace picker in its create/edit dialog; it does not change the remote-host remove/reconnect semantics described above.
+
 ## Manage Remote Agent Hosts (`manageRemoteAgentHosts.ts`)
 
 An F1 command (`workbench.action.sessions.manageRemoteAgentHosts`) that opens a standalone QuickPick showing:
@@ -105,6 +107,8 @@ The one **legitimate exception** is transitioning from `actionWidgetService.hide
 Alongside SSH and tunnel transports, **WSL** is now a supported remote agent-host transport, contributed by `wslAgentHost.contribution.ts` (with `wslAgentHost.contribution.test.ts`). Reconnection logic shared across managed transports is centralized in `managedReconnectAgentHostContribution.ts`.
 
 ## Changelog
+
+- **2026-07-02** — f9f2fd558a — reconciliation: noted that `WorkspacePicker` gained a multi-trigger `renderTrigger(container)` method (`4c959fa6747`, Automations management UI) alongside the original `render(container)`, so the same picker can be mirrored into a second surface; the remote-host remove/reconnect helpers and inline-X semantics are unchanged. The prompt-cache-warning commit (`d9c7d78c4c4`) added an optional header link/dismiss banner to `actionList.ts` (unrelated to the per-row `$(close)` remove button this doc covers) — no body change needed.
 
 - **2026-06-25** — 09c18fe5c5 — reconciliation: added a **WSL-backed remote hosts** section (`wslAgentHost.contribution.ts`, `managedReconnectAgentHostContribution.ts`). The inline-X / disconnect-intent UX rules for SSH and tunnel are unchanged.
 
