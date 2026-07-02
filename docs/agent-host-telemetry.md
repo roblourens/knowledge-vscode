@@ -1,6 +1,6 @@
 # Agent Host telemetry
 
-_Covers: src/vs/platform/agentHost/node/agentHostTelemetryService.ts, src/vs/platform/agentHost/node/agentHostTelemetryReporter.ts, src/vs/platform/agentHost/node/agentSideEffects.ts, src/vs/platform/agentHost/node/agentService.ts, src/vs/platform/agentHost/node/agentHostMain.ts, src/vs/platform/agentHost/node/agentHostServerMain.ts, src/vs/platform/agentHost/electron-main/electronAgentHostStarter.ts, src/vs/platform/agentHost/node/nodeAgentHostStarter.ts, src/vs/platform/agentHost/electron-browser/localAgentHostService.ts, src/vs/platform/agentHost/browser/remoteAgentHostProtocolClient.ts, src/vs/platform/agentHost/common/agentHostSchema.ts, src/vs/platform/agentHost/test/node/agentHostTelemetryService.test.ts, src/vs/platform/agentHost/test/node/agentSideEffects.test.ts, src/vs/platform/agentHost/test/electron-browser/remoteAgentHostProtocolClient.test.ts_
+_Covers: src/vs/platform/agentHost/node/agentHostTelemetryService.ts, src/vs/platform/agentHost/node/agentHostTelemetryReporter.ts, src/vs/platform/agentHost/node/agentHostToolCallTracker.ts, src/vs/platform/agentHost/node/agentSideEffects.ts, src/vs/platform/agentHost/node/agentService.ts, src/vs/platform/agentHost/node/agentHostMain.ts, src/vs/platform/agentHost/node/agentHostServerMain.ts, src/vs/platform/agentHost/electron-main/electronAgentHostStarter.ts, src/vs/platform/agentHost/node/nodeAgentHostStarter.ts, src/vs/platform/agentHost/electron-browser/localAgentHostService.ts, src/vs/platform/agentHost/browser/remoteAgentHostProtocolClient.ts, src/vs/platform/agentHost/common/agentHostSchema.ts, src/vs/platform/telemetry/common/languageModelToolTelemetry.ts, src/vs/platform/agentHost/test/node/agentHostTelemetryService.test.ts, src/vs/platform/agentHost/test/node/agentSideEffects.test.ts, src/vs/platform/agentHost/test/electron-browser/remoteAgentHostProtocolClient.test.ts_
 
 Agent Host owns a VS Code `ITelemetryService` inside the host process so server-side facts can be logged where they happen. This is product telemetry, not the OTel span pipeline used for SDK request tracing. Use `AgentHostOTelService` for trace/span instrumentation and this telemetry path only for GDPR-classified VS Code product events.
 
@@ -31,14 +31,16 @@ Client telemetry propagation is intentionally fire-and-forget. Local and remote 
 
 ## Event placement
 
-Emit server-side Agent Host telemetry from the server-side point that owns the fact. For user-message telemetry, that is `AgentSideEffects`, because it is where a `session/turnStarted` action becomes an `agent.sendMessage(...)` call.
+Emit server-side Agent Host telemetry from the server-side point that owns the fact.
 
-There are two send paths:
+For user-message telemetry, that is `AgentSideEffects`, because it is where a `session/turnStarted` action becomes an `agent.sendMessage(...)` call. There are two send paths:
 
 - direct turns handled by `AgentSideEffects.handleAction(SessionTurnStarted)`;
 - queued messages consumed by `_tryConsumeNextQueuedMessage`.
 
 Both paths must report at the same boundary: immediately before or while handing the message to the agent provider. Do not add a workbench-side duplicate for the same event; that would answer a different question ("UI requested a send") and would miss queued/server-side sends.
+
+For tool-invocation telemetry (`languageModelToolInvoked`, below), the placement is different: `AgentSideEffects` observes the provider-agnostic `ChatToolCallStart`/`ChatToolCallComplete` actions that every provider (Copilot, Claude, Codex) already funnels through, so one emission point covers all providers instead of each provider's session code emitting it independently.
 
 Keep `AgentSideEffects` thin. Event typings, GDPR classifications, and the `publicLog2` call live in `AgentHostTelemetryReporter`.
 
@@ -64,6 +66,18 @@ The IDs in this event are Agent Host protocol/runtime identifiers, not end-user 
 
 `activeClientId` is the current active client on `SessionState.activeClients` (a session can now have several — see [agent-host-protocol § Multiple active clients](./agent-host-protocol.md#multiple-active-clients-per-session)), not necessarily the client that originally dispatched the action. `AgentSideEffects.handleAction(...)` is intentionally not passed the action envelope origin.
 
+## `languageModelToolInvoked` (agent host)
+
+`AgentHostTelemetryReporter.toolInvoked(...)` logs the shared `languageModelToolInvoked` event (`src/vs/platform/telemetry/common/languageModelToolTelemetry.ts`) — the same event workbench tool invocations use — for tool calls made inside agent-host sessions, across **all three** providers (Copilot, Claude, Codex). Before this, only `CopilotAgentSession` emitted it directly, so Claude/Codex agent-host sessions produced ~0 per-tool telemetry (no volume, error rate, or latency data).
+
+Emission is centralized in the provider-agnostic `AgentSideEffects` layer (which already processes `ChatToolCallComplete` for every provider), not per-provider session code:
+
+- `AgentHostToolCallTracker` (`agentHostToolCallTracker.ts`) stamps a `StopWatch.create(true)` (high-resolution, since tool calls can complete in under a millisecond) at `ChatToolCallStart` when an agent is known, and computes `invocationTimeMs` at the matching `ChatToolCallComplete`, keyed by `session:toolCallId` with a dedup guard and a leak guard for tool calls whose completion never arrives.
+- `deriveToolInvokedResult` and `toolSourceKindFromContributor` are pure helpers: a denied/rejected/cancelled tool call result maps to `'userCancelled'`, any other failure to `'error'`; a tool call's `ToolCallContributor` (`mcp` / `client` / absent → `'agentHost'`) maps to `toolSourceKind`.
+- `AgentHostTelemetryReporter.toolInvoked(report: IAgentHostToolInvokedReport)` emits `{ result, chatSessionId, toolId, toolExtensionId: undefined, toolSourceKind, invocationTimeMs, provider }`. `chatSessionId` is normalized from a chat-channel URI back to the session URI (`AgentSession`-shaped, matching what `CopilotAgentSession` previously emitted) since action signals are keyed by chat channel, not session.
+
+Don't reintroduce a per-provider emission of this event — Claude/Codex mappers should keep deriving accurate `toolSourceKind`/result classification (e.g. MCP tool-call detection, deny-vs-error) in their own signal-mapping code and let `AgentSideEffects` do the one shared emission, rather than duplicating the `publicLog2` call.
+
 ## OSS/dev validation
 
 OSS/dev builds without real product telemetry still exercise the send path through logging-only telemetry. When the host is not started with `--disable-telemetry`, `TelemetryLogAppender` writes entries such as `telemetry/agentHost.userMessageSent` to `telemetry.log` as "Telemetry (Not Sent)". This is useful for manually proving the event was attempted without sending real telemetry.
@@ -75,6 +89,8 @@ OSS/dev builds without real product telemetry still exercise the send path throu
 - **gotcha** (2026-05-16, agentHostTelemetryReporter.ts:activeClientId) — `activeClientId` means the session's current active client at send time, not the dispatching client origin. Do not reinterpret it as "client that sent this message" unless the side-effects layer starts receiving action envelope origin explicitly.
 
 ## Changelog
+
+- **2026-07-02** — f9f2fd558a — reconciliation: documented the new shared `languageModelToolInvoked` telemetry event (`f18c6b4f395`), now emitted for agent-host tool calls across Copilot, Claude, and Codex via a provider-agnostic `AgentHostToolCallTracker` in `AgentSideEffects` (previously Copilot-only, emitted from `CopilotAgentSession`). Updated "Event placement" to distinguish its `ChatToolCallStart`/`ChatToolCallComplete`-driven placement from the `userMessageSent` two-send-path model. Added `agentHostToolCallTracker.ts` and `languageModelToolTelemetry.ts` to Covers. Existing Debt & gotchas entries re-checked against this change — all three remain accurate and unaffected.
 
 - **2026-06-25** — 09c18fe5c5 — reconciliation: noted the dedicated `channels-otlp` (`ahp-otlp:`) OTel-over-AHP transport (distinct from this doc's product-telemetry path) and updated the `activeClientId` reference to `SessionState.activeClients` (now plural). The product-telemetry bootstrap, disablement, and `agentHost.userMessageSent` event shape are unchanged.
 

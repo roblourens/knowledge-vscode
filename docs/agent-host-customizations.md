@@ -22,7 +22,9 @@ These are intentionally adjacent but not interchangeable: local discovery decide
 
 The protocol's `CustomizationType` enum has grown beyond plugins/files. Today it is `Plugin | Directory | Agent | Skill | Prompt | Rule | Hook | McpServer`. There is **no** `SessionCustomization` type — session-scoped customizations are just refs in `activeClient.customizations` / `SessionCustomizationsChanged`. `Plugin` and `Directory` are *container* types whose children are expanded by the item provider; `ClientPluginCustomization` carries a `nonce` for cache invalidation.
 
-`ICustomizationItemProvider` gained a `provideSourceFolders` method so a provider can report the folders backing its customizations (used by features that need the on-disk roots, not just expanded items).
+`ICustomizationItemProvider` gained a `provideSourceFolders` method so a provider can report the folders backing its customizations (used by features that need the on-disk roots, not just expanded items). Each returned `ICustomizationSourceFolder` now also carries a `source` (`AICustomizationSources.local` vs `.user`), derived the same way item expansion classifies local vs user-level customizations (`workingDirectory`-relative vs not), so folder pickers can group/label source folders consistently with the items they back.
+
+Rule/instruction items now get a finer-grained `groupKey` in addition to the existing `REMOTE_CLIENT_GROUP`: a rule with `globs` gets `'context-instructions'` (with a `badge`/`badgeTooltip` showing the glob pattern, or "always added" for `**`), a rule with `alwaysApply` gets `'agent-instructions'`, and anything else gets `'on-demand-instructions'`. This only applies to non-remote items — `isRemote` (renamed from the old bare `groupKey` parameter threaded through `toDirectoryItems`/`toDirectoryChildItem`) still wins first and assigns `REMOTE_CLIENT_GROUP`.
 
 The standalone `IAgentHostCustomAgentsService` was **removed**; custom-agent handling was consolidated into `AgentCustomizationItemProvider` plus `IAgentHostCustomizationService`. `AgentHostModeSynchronizer` survives as the piece that keeps chat **modes** in sync. **Hooks** (`CustomizationType.Hook`) are deliberately excluded from prompt sync — they are not prompt-attachable customizations.
 
@@ -45,15 +47,19 @@ Remote hosts have a management action, `RemoteAgentPluginController.addConfigure
 
 ## Built-in skills (`BUILTIN_STORAGE`)
 
-The Sessions app ships a set of built-in slash-command skills (`/create-pr`, `/merge`, `/update-pr`, `/create-draft-pr`) defined as SKILL.md files inside the `extensions/copilot/` extension folder. These are surfaced through `AgenticPromptsService` under the `BUILTIN_STORAGE` sentinel value (defined in `aiCustomizationWorkspaceService.ts`), which is NOT a member of the core `PromptsStorage` enum — it is an extra value recognized only by `AgenticPromptsService` (the sessions-aware implementation).
+The agent window ships a set of built-in slash-command skills (`/create-pr`, `/merge`, `/update-pr`, `/create-draft-pr`) defined as SKILL.md files inside the `extensions/copilot/` extension folder. These are surfaced through `AgenticPromptsService` under the `BUILTIN_STORAGE` sentinel value (defined in `aiCustomizationWorkspaceService.ts`), which is NOT a member of the core `PromptsStorage` enum — it is an extra value recognized only by `AgenticPromptsService` (the agent-window-aware implementation).
 
 `enumerateLocalCustomizationsForHarness` calls `promptsService.listPromptFilesForStorage(PromptsType.skill, BUILTIN_STORAGE as PromptsStorage)` and appends the results so they are included in the synced customization bundle that both local and remote agent hosts see. The built-in entries carry `storage: BUILTIN_STORAGE` and are subject to `syncProvider.isDisabled(uri)` like any other skill.
 
-**Critical:** the regular workbench `PromptsServiceImpl` throws for unknown storage values. Always wrap the `BUILTIN_STORAGE` lookup in `try/catch` and treat any throw as "no built-in skills available" — the implementation only has the built-in skills when `AgenticPromptsService` is active (Sessions app context). See the `gotcha` entry below.
+**Critical:** the regular workbench `PromptsServiceImpl` throws for unknown storage values. Always wrap the `BUILTIN_STORAGE` lookup in `try/catch` and treat any throw as "no built-in skills available" — the implementation only has the built-in skills when `AgenticPromptsService` is active (agent window context). See the `gotcha` entry below.
 
 ## `supportsPromptAttachments`
 
 Both AH chat session contributions (local `agentHostChatContribution.ts` and remote `remoteAgentHost.contribution.ts`) declare `supportsPromptAttachments: true` in their `capabilities` block so the chat input wires up prompt attachment UI for AH sessions. This is independent of the providers above but is in the same "make AH skill/prompt UX reach parity" surface area; if you add another AH chat session contribution, set this flag too.
+
+Both harness descriptors also set `hiddenSections` to hide management-UI sections that don't apply to their surface. The local harness (`agentHostChatContribution.ts`) now hides `AICustomizationManagementSection.Prompts` for every provider (previously only non-Copilot-CLI providers hid it) and additionally hides `Tools` for non-Copilot-CLI providers; the remote harness (`remoteAgentHostCustomizationHarness.ts`) hides `Models` and `McpServers`. Both harnesses still implement `getStorageSourceFilter`/`IStorageSourceFilter`; Automations reintroduced that source-filter contract after an intermediate removal.
+
+A new **Automations** feature (scheduled/recurring agent runs, `src/vs/sessions/contrib/automations/`, outside this doc's Covers) reuses `AgentCustomizationItemProvider` and threads permission/model selection through the same `ChatInputPart`/`ChatInputSecondary` menu machinery described in [agent-host-auto-approve-picker](./agent-host-auto-approve-picker.md). It is a new consumer, not a change to the provider contract itself.
 
 ## Decoration revival on reload
 
@@ -78,6 +84,8 @@ If you need decorations to survive reload for AH sessions, the pragmatic fix is 
 - **debt** (2026-04-28, AH chat session restore path) — AH-restored chat requests don't re-parse for slash commands, so skill decorations don't survive reload. Re-running `ChatRequestParser.parseChatRequest` when hydrating AH user messages from AHP state would fix this.
 
 ## Changelog
+
+- **2026-07-02** — f9f2fd558a — reconciliation: documented `provideSourceFolders`' new per-folder `source` (local vs user) field and the new `groupKey`/`badge` classification for Rule items (`context-instructions` / `agent-instructions` / `on-demand-instructions`) added by `ac174e660b1` and `2ec88ac9a42`. Updated the `hiddenSections` description for both harnesses and noted that Automations (`4c959fa6747`) reintroduced the `getStorageSourceFilter`/`IStorageSourceFilter` contract after its intermediate removal in `34fa7dbcc38`. Noted the new **Automations** feature as a consumer of `AgentCustomizationItemProvider`, outside this doc's Covers. The host-side `~/.copilot/skills` user-dir discovery fix (`1ae8d999061`) touches `sessionCustomizationDiscovery.ts`, which is not in this doc's Covers (host-side discovery, not the client-side item providers) — no body change needed for it.
 
 - **2026-06-25** — 09c18fe5c5 — reconciliation: added a **Customization taxonomy** section (`CustomizationType` is now `Plugin | Directory | Agent | Skill | Prompt | Rule | Hook | McpServer`; no `SessionCustomization`; `Plugin`/`Directory` are containers; `ClientPluginCustomization.nonce`; new `ICustomizationItemProvider.provideSourceFolders`; `IAgentHostCustomAgentsService` removed and folded into `AgentCustomizationItemProvider` + `IAgentHostCustomizationService`; `AgentHostModeSynchronizer` survives; Hooks excluded from prompt sync). Added a **MCP servers as customizations** section (`CustomizationType.McpServer`, `McpServerCustomization`, `protocol/mcpAppDefaults.ts`, `McpCustomizationController`, `syncedCustomizationBundler.ts` / `SyncedCustomizationBundler` / `ISyncableMcpServer`, `workbench.mcp.agentHostServerOptions`).
 

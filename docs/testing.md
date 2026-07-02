@@ -13,8 +13,9 @@ The agent host has four distinct test layers, each with its own runner, scope, a
 **Where they live:**
 - Platform layer: `src/vs/platform/agentHost/test/node/*.test.ts`
 - Shared/common helpers: `src/vs/platform/agentHost/test/common/*.test.ts`
+- Renderer reverse-RPC/IPC channel registration: `src/vs/platform/agentHost/test/electron-browser/*.test.ts` (e.g. `localAgentHostService.test.ts` covers the BYOK language-model bridge channel registration degrading gracefully when a connecting window hasn't bound a handler).
 - Workbench adapters: `src/vs/workbench/contrib/chat/test/browser/agentSessions/**/*.test.ts`, `src/vs/workbench/contrib/chat/test/browser/agentHost/*.test.ts`. `agentSessions/agentHostPermissionUiContribution.test.ts` covers the remote-host local-file permission prompt bridge.
-- Sessions app: `src/vs/sessions/test/**/*.test.ts`
+- Agent window (Sessions layer): `src/vs/sessions/test/**/*.test.ts`
 - UI content parts: `src/vs/workbench/contrib/chat/test/browser/widget/chatContentParts/*.test.ts`
 
 **How to run:**
@@ -38,7 +39,7 @@ Pattern matches mocha suite/test names. Examples: `--grep "AgentSideEffects|Agen
 
 **What they exercise:** A real Agent Host server process started by `startServer()`, talking to one or more in-test clients via WebSocket. Agents are mocked via `ScriptedMockAgent` (the `--enable-mock-agent` flow), so the *protocol* is exercised end-to-end but no SDK is involved.
 
-**Where they live:** `src/vs/platform/agentHost/test/node/protocol/*.integrationTest.ts`. Existing files include `handshake`, `sessionLifecycle`, `sessionFeatures`, `sessionConfig`, `turnExecution`, `toolApproval`, `clientTools`, `multiClient`, `agentHostServer`.
+**Where they live:** `src/vs/platform/agentHost/test/node/protocol/*.integrationTest.ts`. Existing files include `handshake`, `sessionLifecycle`, `sessionFeatures`, `sessionConfig`, `turnExecution`, `toolApproval`, `clientTools`, `multiClient`, `agentHostServer`, `copilotCustomizations`.
 
 **How to run:**
 ```sh
@@ -86,6 +87,8 @@ Auth comes from `gh auth token` by default; override with `GITHUB_TOKEN`.
 - For routine logic. The auth-and-network hop makes them slow and occasionally flaky; CI does not run them by default.
 - Any test that doesn't genuinely depend on the real SDK behavior. If a `ScriptedMockAgent` event sequence captures the contract, prefer the protocol integration test instead.
 
+**Mocked-LLM variant (`copilotRealSdkMocked.integrationTest.ts`).** A newer sibling suite runs the **real** `@github/copilot` SDK/process against a local mock LLM HTTP server (`startRealServer({ mockLlm: true })` in `testHelpers.ts`) instead of a live provider endpoint. Unlike `copilotRealSdk.integrationTest.ts` / `claudeRealSdk.integrationTest.ts`, it does **not** gate its suite on `AGENT_HOST_REAL_SDK` (`enabled: true` unconditionally in `realSdkTestHelpers.ts`'s `(config.enabled ? suite : suite.skip)` pattern) — it needs no network or auth, so it matches the default `--runGlob '**/*.integrationTest.js'` and **runs in default PR CI** (`./scripts/test-integration.sh --tfs "Integration Tests"`), unlike the gated real-SDK suites. Use this variant for SDK-process-shape assertions you want enforced on every PR rather than only when someone remembers to set `AGENT_HOST_REAL_SDK=1`.
+
 ### 4. Workbench / chat / UI tests
 
 **What they exercise:** The workbench-side adapters that translate AHP state into VS Code chat sessions, edits, and UI. They run under the same unit-test runner (`./scripts/test.sh`) but interact with `IAgentConnection`, `ChatService`, content parts, and the editing session.
@@ -123,7 +126,7 @@ Otherwise — single class or function, drive with events, assert on state?
 
 ## Exploratory UI testing via the launch skill
 
-The four layers above cover automated tests. For exploratory work — bug-bashing the running Agents window, validating that a multi-turn flow renders correctly, or reproducing a specific UI symptom against the real SDK — the canonical tool is the `launch` skill at `.agents/skills/launch/SKILL.md` in the VS Code repo. It launches Code OSS from sources into a slim-copied throwaway profile with unique debug ports, and drives the UI via `@playwright/cli` over CDP.
+The four layers above cover automated tests. For exploratory work — bug-bashing the running agent window, validating that a multi-turn flow renders correctly, or reproducing a specific UI symptom against the real SDK — the canonical tool is the `launch` skill at `.agents/skills/launch/SKILL.md` in the VS Code repo. It launches Code OSS from sources into a slim-copied throwaway profile with unique debug ports, and drives the UI via `@playwright/cli` over CDP.
 
 This is not a substitute for automated tests, but it has caught classes of issues the four layers can't reach: tool-card rendering across multi-command turns, cancellation UX, session restore across process restart, approval-prompt visual layout, etc. Treat any finding from an exploratory run as a candidate for an automated test at one of the four layers above before declaring it "fixed".
 
@@ -150,6 +153,8 @@ Three coordination details bite if missed (each surfaced in the 2026-05-26 termi
 - **gotcha** (2026-04-22, protocol/copilotRealSdk.integrationTest.ts) — when asserting on shell-command text the SDK emitted, anchor the regex with `^` and explicitly tolerate quoted variants (`cd "<dir>"` vs `cd <dir>`) and both chain operators (`&&` and `;`). A naked `String.includes("cd " + tempDir)` substring check misses quoted forms and is also tripped by tempDir appearing later in the same command. The cd-prefix-strip test uses `new RegExp('^cd (?:"' + esc + '"|' + esc + ')\\s*(?:&&|;)')` against the rewritten and the original command lines.
 
 ## Changelog
+
+- **2026-07-02** — f9f2fd558a — reconciliation: the four test layers still hold; added a **Mocked-LLM variant** callout under layer 3 for the new `copilotRealSdkMocked.integrationTest.ts` (`148a3b30735`), which runs the real Copilot SDK against a local mock LLM server and — unlike the `AGENT_HOST_REAL_SDK`-gated suites — is **not** gated, so it runs in default PR CI. Added `copilotCustomizations.integrationTest.ts` to the layer-2 file list and a new `src/vs/platform/agentHost/test/electron-browser/*.test.ts` location (renderer reverse-RPC/IPC channel registration, e.g. `localAgentHostService.test.ts`) to layer 1. The prior baseline SHA (`5edb399a83`, dated 2026-06-27) post-dates `09c18fe5c5` but is not an ancestor of `origin/main` because its source history was rebased/superseded before landing; this reconciliation therefore used the baseline-date fallback.
 
 - **2026-06-27** — 5edb399a83 — corrected the retranspile tip: `./scripts/test.sh` does **not** compile (it only launches Electron + the runner against existing `out/`), contrary to the prior "retranspiles internally" claim. It relies on a `npm run watch` daemon for *this* checkout; a watch attached to a different checkout can leave `out/` silently stale, so a brand-new test "passes" because it isn't even compiled in. Recommend `node build/next/index.ts transpile` after edits and grepping `out/...js` for a just-added symbol to confirm freshness. Hit during the #318604 fix.
 

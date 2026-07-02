@@ -2,7 +2,7 @@
 
 _Covers: src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostSessionHandler.ts, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostSessionListController.ts, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostChatContribution.ts, src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostSessionWorkingDirectoryResolver.ts_
 
-`AgentHostSessionHandler` is the **shared** adapter between AHP session state (see [agent-host-protocol](./agent-host-protocol.md)) and VS Code chat sessions. The same handler runs in all three deployment configurations — VS Code with a local agent host, the Agents app with a local agent host, and the Agents app with one or more remote agent hosts. For the topology and what `connectionAuthority` / `sessionType` mean, see [agent-host-topology](./agent-host-topology.md).
+`AgentHostSessionHandler` is the **shared** adapter between AHP session state (see [agent-host-protocol](./agent-host-protocol.md)) and VS Code chat sessions. The same handler runs in all three deployment configurations — VS Code with a local agent host, the agent window with a local agent host, and the agent window with one or more remote agent hosts. For the topology and what `connectionAuthority` / `sessionType` mean, see [agent-host-topology](./agent-host-topology.md).
 
 ## What it owns
 
@@ -24,13 +24,15 @@ For each chat session backed by an Agent Host, the handler:
 - **Forwards customization refs** so the active client's customizations apply to the running session.
 - **Supplies chat-input completions** by asking the connection for generated AHP completion items, translating command/skill/attachment-backed items into the workbench completion model, and honoring trigger characters announced during initialize.
 - **Renders agent-originated input requests** from `SessionState.inputRequests`, including elicitation forms and URL-style affordances that providers translate into the generic AHP input-request state.
+- **Surfaces required MCP server authentication** as a chat progress part, retrying silently where possible; see [MCP authentication](#mcp-authentication) below.
+- **Supplies the per-turn "Changed N files" summary** for chat responses by registering an `AgentHostResponseFileChangesProvider` (`agentHostResponseFileChanges.ts`) with the workbench's `IChatResponseFileChangesService`, keyed by session type; see [agent-host-git-driven-diffs](./agent-host-git-driven-diffs.md#per-turn-file-changes-summary-in-chat-responses).
 
 ## What it does NOT own
 
 - Choosing models — that's `AgentHostLanguageModelProvider` (`agentHostLanguageModelProvider.ts`).
 - Discovering agents and registering chat session contributions — that's `AgentHostContribution` (`agentHostChatContribution.ts`), which listens to local `rootState.agents` and dynamically registers one chat session type per advertised agent (`agent-host-${agent.provider}`).
 - Listing sessions in the workbench chat list — that's `AgentHostSessionListController` (`agentHostSessionListController.ts`). It fetches sessions via `connection.listSessions()` on the first `refresh()`, caches the result in `_items`, and skips the RPC on subsequent `refresh()` calls. The in-memory cache is kept current by `notify/sessionAdded`, `notify/sessionRemoved`, and `notify/sessionSummaryChanged` notifications. The cache is invalidated (a) implicitly, when the agent registration is torn down and a new controller is created; (b) explicitly, via `resetCache()` called from `AgentHostContribution.onAgentHostStart`, which fires when the agent host process restarts without changing the registration. AHP notifications are not replayed on reconnect, so the explicit path is required. The controller also implements `newChatSessionItem` for local agent-host chat-session startup; see [Chat-session URI ownership](#chat-session-uri-ownership).
-- Showing sessions in the Sessions app — that's the `*AgentHostSessionsProvider` family under `src/vs/sessions/contrib/`; see [agent-host-sessions-providers](./agent-host-sessions-providers.md).
+- Showing sessions in the agent window — that's the `*AgentHostSessionsProvider` family under `src/vs/sessions/contrib/`; see [agent-host-sessions-providers](./agent-host-sessions-providers.md).
 
 ## Local vs. remote
 
@@ -58,7 +60,7 @@ Agent Host chat sessions should not expose `/untitled-*` resources past the gene
 
 There are two creation paths, both client-owned:
 
-- **Sessions app / provider-created drafts.** `BaseAgentHostSessionsProvider.createNewSession(...)` creates an `ISession.resource` with the host-specific chat resource scheme (`agent-host-${provider}` locally, `remote-${authority}-${provider}` remotely) and a final-looking random path (`/${uuid}`). It also records that the resource is still a local draft (`SessionStatus.Untitled`) until the first turn creates the backend session and the backend list reports it.
+- **Agent window / provider-created drafts.** `BaseAgentHostSessionsProvider.createNewSession(...)` creates an `ISession.resource` with the host-specific chat resource scheme (`agent-host-${provider}` locally, `remote-${authority}-${provider}` remotely) and a final-looking random path (`/${uuid}`). It also records that the resource is still a local draft (`SessionStatus.Untitled`) until the first turn creates the backend session and the backend list reports it.
 - **Workbench contributed-chat blank widget.** The chat layer may temporarily create an internal `/untitled-*` resource for a blank contributed chat widget. On first send, `ChatServiceImpl.sendRequest` calls `IChatSessionsService.createNewChatSessionItem(...)` before invoking the agent. For local Agent Host, `AgentHostSessionListController.newChatSessionItem(...)` returns a real final-looking `agent-host-${provider}:/${uuid}` item and marks the raw id as pending-new. The handler is then loaded for that real resource, not for the `/untitled-*` staging URI.
 
 `AgentHostSessionHandler` therefore rejects `agent-host-*:/untitled-*` resources. If one reaches the handler, it means the startup path skipped `newChatSessionItem` or a caller invented a resource outside the Agent Host owner boundary.
@@ -66,7 +68,7 @@ There are two creation paths, both client-owned:
 For final-looking resources, the handler distinguishes "new draft" from "existing backend session" via explicit ownership predicates, not by path shape:
 
 - Local workbench chat: `AgentHostContribution` wires `AgentHostSessionListController.isNewSession(resource)` into the handler config. That predicate is true only for ids returned by `newChatSessionItem` and is cleared when `notify/sessionAdded`, `notify/sessionRemoved`, or a later `refresh()` observes the real backend session.
-- Sessions app providers: `IAgentHostSessionWorkingDirectoryResolver.registerResolver(...)` accepts an `isNewSession` predicate. Local and remote provider contributions register that predicate against the **chat resource scheme** (not the logical provider id) and return true while `getSessionByResource(resource)?.status` is `SessionStatus.Untitled`.
+- Agent window providers: `IAgentHostSessionWorkingDirectoryResolver.registerResolver(...)` accepts an `isNewSession` predicate. Local and remote provider contributions register that predicate against the **chat resource scheme** (not the logical provider id) and return true while `getSessionByResource(resource)?.status` is `SessionStatus.Untitled`.
 
 When the first request arrives for a draft, `_createAndSubscribe` derives `requestedSession = AgentSession.uri(config.provider, rawId)` from the chat resource and passes it to `connection.createSession({ session: requestedSession, ... })`. The server/remote connection must return the same URI; a mismatch is a contract error. Forks are the exception: fork creation lets the backend choose the new fork URI because the fork source/turn is the defining input.
 
@@ -80,11 +82,21 @@ If a behavior could be expressed as a protocol action and reducer change, prefer
 
 ## Request context and client-tool parity
 
-`AgentHostSessionHandler` converts incoming chat request variables to provider attachments in `_convertVariablesToAttachments`. Today that conversion handles basic files, directories, and implicit selection variables. The `IAgentAttachment` type already supports selection text and range, and the Copilot provider forwards those fields to the SDK when present, but the handler currently sends only the selected file path/display name for selections. Richer prompt/reference parity with the extension-host Copilot CLI still needs explicit work here.
+`AgentHostSessionHandler` converts incoming chat request variables to provider attachments in `_convertVariablesToAttachments`. Beyond basic files, directories, and implicit selection variables, the handler now forwards two additional kinds of context:
+
+- **Implicit active-editor forwarding.** `_appendActiveEditorAttachments` forwards the widget's active editor as ambient context (the suggested-context flow omits it in agent mode), gated on `ChatConfiguration.ImplicitContextActiveEditor` (on by default, off in the agent window) and deduped against explicitly-attached files via `_fileEntryDedupeKey`/`_attachmentDedupeKey` (rebased URI + selection range). Non-Copilot-CLI backends skip untitled buffers (they can't read an unattached in-memory file by path).
+- **Unsaved/dirty-editor inlining.** `_buildUnsavedEditorAttachment` inlines the live in-memory text of an unsaved or dirty file (`_isUnsavedResource`) as a `MessageEmbeddedResourceAttachment` rather than a plain file reference, so a path-reading backend still sees current content. Selection entries inline only the selected range; whole-document entries inline the full buffer. Capped at `MAX_INLINED_UNSAVED_EDITOR_BYTES` (1 MB, matching `chatRepoInfo`'s cap) — over-cap buffers fall back to being skipped rather than materialized.
+- **Session-reference attachments** (Copilot CLI only). A `sessionReference` variable produces *two* attachments via `_toSessionReferenceAttachments`: a textual summary attachment, and a `Resource` attachment pointing at the referenced session's Copilot CLI `events.jsonl` trajectory file (path resolved by `buildHostLocalEventsPath`). This is explicitly scoped to Copilot CLI sessions only — the code has open TODOs to support non-Copilot-CLI session references (via `IChatModel` or a first-class AHP attachment) and full extension-host-to-agent-host session porting for continue/resume flows.
+
+The `IAgentAttachment` type already supports selection text and range, and the Copilot provider forwards those fields to the SDK when present, but richer prompt/reference parity with the extension-host Copilot CLI (diagnostics, PR references, notebook exclusions, worktree path translation) still needs explicit work.
+
+Restored history round-trips a `workspace`-kind variable entry (implicit workspace context) correctly again: `_toSimpleAttachment` tags it with `displayKind: 'workspace'`, and `messageAttachmentToVariableEntry` (`stateToProgressAdapter.ts`) checks for that tag before falling through to the generic paste-entry reconstruction, which previously reconstituted a restored workspace-context attachment as an opaque paste entry instead of a workspace one.
 
 The extension-host Copilot CLI has a dedicated prompt resolver (`copilotcliPromptResolver.ts`) that handles more reference kinds: selected text/ranges, diagnostics, prompt files, GitHub PR references, merge-change references, images, ignore filtering, notebook exclusions, and worktree path translation. Agent Host should port the relevant semantics into AHP-friendly attachments or client tools rather than copying the extension's storage/transport details directly.
 
 Client tools are already generic: `_dispatchActiveClient` sends the active client's tool definitions over AHP, and `_beginClientToolInvocation` / `_tryInvokeClientTool` route tool calls back to VS Code. That is the right abstraction for remote/local parity. The current gap is product defaults and exact Copilot CLI parity: the extension-host path ships built-in VS Code tools such as `get_selection`, `get_diagnostics`, `get_vscode_info`, `open_diff`, `close_diff`, and `update_session_name`, while Agent Host currently relies on the `chat.agentHost.clientTools` allowlist and whatever workbench tools are configured.
+
+`_beginClientToolInvocation` always dispatches a terminal `ChatToolCallComplete` back to the protocol now, even when the corresponding tool call wasn't already in a terminal protocol state — covering failure paths (prepare-invocation rejection, completions that land while a confirmation is still pending) that previously could leave a client tool call stalled in the UI indefinitely.
 
 ## Patterns and gotchas
 
@@ -121,6 +133,7 @@ The subagent flow has a few non-obvious orderings between events that arrive on 
 - **`subagent_started` arrives after the description is set.** The wrapping tool's `description` is set at `tool_start` time; the agent name only arrives via `subagent_started` later. The `chatSubagentContentPart.ts` autorun must update `description` and `agentName` *independently*, each gated on whether the field actually changed. Gating both updates on a single `_isDefaultDescription` flag (or similar) silently drops the late `agentName` and the UI falls back to the generic "subAgent" label.
 - **SDK-specific arg shapes belong in the per-SDK adapter.** The Copilot SDK's `task` tool destructures `agent_type` (snake_case) — that parsing lives in `copilot/copilotToolDisplay.ts::getSubagentMetadata`, not in the generic `agentEventMapper.ts`. The mapper only forwards normalized `subagentAgentName` and `subagentDescription` event fields. See [copilot-agent-provider](./copilot-agent-provider.md).
 - **Auto-approval covers tool calls inside subagent sessions.** Tools that should auto-approve in the parent (workspace reads, etc.) must also auto-approve when run by the child. Verify with the protocol integration test that exercises the `subagent` prompt.
+- **Nested subagents (subagents spawning subagents) are observed regardless of depth.** `tryObserveSubagent` no longer requires the `subagent_started` discovery content block to have arrived before it starts observing — it treats any tool that is recognizably subagent-spawning (`isSubagentTool`) or already carries a subagent content block as observable as soon as it's `Running`/`Completed`, deriving the child chat URI from the tool call id alone. This matters for agent hosts that don't route the discovery block to the immediate parent chat of a nested (depth ≥ 2) subagent, and for restored snapshots that predate the block — gating on it would leave such a subagent, and any client tools it invokes, permanently unobserved. Descendant tool calls are grouped under a `rootInvocationId` (the top-level subagent's tool call id, not the immediate parent's) so the renderer nests an entire subagent tree under one container.
 
 ## Per-turn model rendering
 
@@ -132,13 +145,25 @@ Per-model pricing / multiplier information **is** now propagated from AHP (resol
 
 Per-turn token/cost accounting flows through `UsageInfo` / `UsageInfoMeta` (see [agent-host-protocol](./agent-host-protocol.md)) — cost, Copilot AIU (`totalNanoAiu`), and quota snapshots ride `_meta`, read via `readUsageInfoMeta` / `readAccountQuotaSnapshot`. The handler aggregates **subagent** credits into the parent turn via an `ISettableObservable` accumulator, so a parent turn's reported cost includes the work its subagents did. Cancelled turns **retain** their accrued usage (commit `0f0b5838655`) rather than discarding it. Context-size for the gauge comes from the model's `configSchema` `contextSize` property. The UI surfaces live in `chatContextUsageWidget.ts` / `chatContextUsageDetails.ts`, and the per-subagent cost hover in `chatSubagentContentPart.ts`.
 
+`_invokeAgent` also wraps the turn's progress sink with a `StopWatch` to record `firstProgress` (time to the first markdown/thinking/tool-invocation progress) and `totalElapsed`, returned as `timings` on `IChatAgentResult`. This populates the core `interactiveSessionProviderInvoked` telemetry event for agent-host providers, which previously reported no timing data for these sessions.
+
+## MCP authentication
+
+`AgentHostSessionHandler` derives an `mcpAuthRequired$` observable per turn from the session's customizations (flattening top-level `McpServer` customizations and their children), filtered to those with `state.kind === McpServerStatus.AuthRequired`. An autorun (skipped for subagent observers — auth prompts render on the top-level session only) reacts to that list:
+
+1. It calls `_filterAutoGrantedMcpAuthentication`, which tries `resolveMcpServerAuthentication` with `allowInteraction: false` for each pending server — silently completing auth for servers that already have a usable, non-interactive grant (e.g. an existing session) without ever surfacing UI.
+2. Whatever remains after that filter is pushed into a single `IChatMcpAuthenticationRequired` progress part (kind `mcpAuthenticationRequired`, rendered by `chatMcpAuthenticationContentPart.ts`), created lazily on first need and updated in place (via its own `servers` observable) rather than re-emitted, so it doesn't spawn a new progress part per state change. The part is only created once there's something to show, and updates stop once the part `isUsed`.
+3. Because step 1 is asynchronous, a run-id counter (`mcpAuthRunId`) guards against out-of-order completions: if `mcpAuthRequired$` changes again before an in-flight `_filterAutoGrantedMcpAuthentication` call resolves, the stale resolution is dropped instead of clobbering newer state.
+
+Server identity for auth purposes is `agentHostMcpServerId` (`agent-host-mcp:<authority>/<serverName>/<resourceUrl>`, `agentHostAuth.ts`) — deliberately **not** the customization id, because customization ids aren't guaranteed stable across reloads/re-syncs, whereas this identity is derived from data that is.
+
 ## Where to edit
 
 - Turn rendering, progress, history, cancellation, server-initiated turns, permissions, customization refs → `agentHostSessionHandler.ts`.
 - Adapter helpers (state → progress) → `stateToProgressAdapter.ts`.
 - File edits / checkpoints → `agentHostEditingSession.ts`.
 - Client tools (definition/result conversion, allowlist) → `agentHostClientTools.ts`.
-- Auth retry behavior → `agentHostAuth.ts`.
+- Auth retry behavior, MCP server identity/auto-grant resolution → `agentHostAuth.ts`.
 
 ## Tests
 
@@ -146,7 +171,7 @@ See [testing](./testing.md) for the four test layers and when to use each. Tests
 
 - `src/vs/workbench/contrib/chat/test/browser/agentSessions/agentHostChatContribution.test.ts` — dynamic registration, session id mapping, create/subscribe, progress rendering, cancellation, errors, permission requests, history, tool rendering, attachments, dynamic discovery, config forwarding, **active-turn reconnect**, server-initiated turns, customizations.
 - `agentHostClientTools.test.ts` — tool definition/result conversion, allowlist filtering, active-client tool updates.
-- `src/vs/workbench/contrib/chat/test/browser/agentHost/agentHostEditingSession.test.ts` — file edit hydration, undo/redo, snapshots, checkpoint disablement.
+- `src/vs/workbench/contrib/chat/test/browser/agentHost/agentHostSnapshotController.test.ts` — file-edit snapshots, undo/redo, checkpoint disablement, and request checkpoint behavior.
 - `src/vs/workbench/contrib/chat/test/browser/widget/chatContentParts/chatSubagentContentPart.test.ts` — late metadata updates (description→agent name ordering), lazy expand, current-running-tool title.
 - `src/vs/platform/agentHost/test/node/agentSideEffects.test.ts` — subagent event buffering, `_pendingSubagentEvents` cleanup when parent completes without `subagent_started`.
 
@@ -154,16 +179,16 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 
 ## Related
 
-- [agent-host-topology](./agent-host-topology.md) — the two-app topology and three deployment configurations the handler runs in.
+- [agent-host-topology](./agent-host-topology.md) — the editor-window/agent-window topology and three deployment configurations the handler runs in.
 - [agent-host-protocol](./agent-host-protocol.md) — the contract this handler consumes and dispatches against.
-- [agent-host-sessions-providers](./agent-host-sessions-providers.md) — the other consumer of the same `StateComponents.Session` subscriptions, in the Sessions app.
+- [agent-host-sessions-providers](./agent-host-sessions-providers.md) — the other consumer of the same `StateComponents.Session` subscriptions, in the agent window.
 
 ## Debt & gotchas
 
 - **gotcha** (2026-04-30, agentHostSessionHandler.ts:provideChatSessionContent + AgentHostSessionListController.newChatSessionItem) — Agent Host chat resources reaching the handler must be final-looking resources created by the Agent Host owner path. `/untitled-*` is only an internal contributed-chat staging URI; first send must call `IChatSessionsService.createNewChatSessionItem`, which lets `AgentHostSessionListController.newChatSessionItem` choose the real URI. If `agent-host-*:/untitled-*` reaches the handler, treat it as a bug, not as a valid draft.
 - **gotcha** (2026-04-30, agentHostSessionHandler.ts:_createAndSubscribe) — the VS Code client chooses the AHP session URI for non-fork Agent Host session creation. `_createAndSubscribe` must pass `session: AgentSession.uri(provider, rawId)` and fail if the connection returns a different URI. Do not reintroduce a UI-resource-to-backend-resource map or let the backend silently generate a different id for the same chat resource.
 
-- **debt** (2026-04-21, agentHostSessionHandler.ts:_convertVariablesToAttachments) — selection attachments currently send only path/display name even though `IAgentAttachment` supports `text` and `selection`, and the Copilot provider forwards them to the SDK. Populate selected text/range before treating selection parity as complete.
+- **debt** (2026-04-21, agentHostSessionHandler.ts:_convertVariablesToAttachments) — **partially resolved.** Selection/file attachments for a **saved, clean** file still send only path/range (`_toSelectionAttachment`) and rely on the backend to read the file itself — that part of the debt is unchanged. What's new: unsaved/dirty buffers are now inlined as embedded-text attachments (`_buildUnsavedEditorAttachment`, gated to Copilot CLI, capped at `MAX_INLINED_UNSAVED_EDITOR_BYTES`), and the active editor is now implicitly forwarded as ambient context (`_appendActiveEditorAttachments`). Selected-text-for-saved-files is still not sent even though `IAgentAttachment` supports it — revisit whether backends other than Copilot CLI need it before closing this out.
 - **debt** (2026-04-21, agentHostSessionHandler.ts:_convertVariablesToAttachments) — request context parity is much thinner than the extension-host Copilot CLI prompt resolver: diagnostics, image/binary attachments, PR/merge references, ignored-file filtering, notebook exclusions, and worktree path translation need AHP-native equivalents.
 - **debt** (2026-04-21, agentHostSessionHandler.ts:_dispatchActiveClient) — client tools are generic and allowlist-driven, but Agent Host does not yet provide a curated default set equivalent to the extension-host CLI's `get_selection`, `get_diagnostics`, `get_vscode_info`, `open_diff`, `close_diff`, and `update_session_name` tools.
 - **RESOLVED** (was debt 2026-05-02, now fixed as of 2026-06-25 / 09c18fe5c5) — `SessionModelInfo` carrying no multiplier/pricing field. Pricing now rides `SessionModelInfo._meta` under the `pricing` key via the platform-level `agentModelPricing.ts`, and `AgentHostLanguageModelProvider._createMetadata` maps it onto `ILanguageModelChatMetadata.multiplierNumeric` / `pricing`. See the "Cost and usage aggregation" section above.
@@ -178,6 +203,8 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 - **gotcha** (2026-06-27, agentHostSessionHandler.ts:AgentHostSessionHandler.dispose + _settleInFlightSessions) — the handler's `dispose()` is a **manual override** (not just `this._register` cleanup): it iterates `_activeSessions`, disposes each `AgentHostChatSession`, and clears the subscription maps before `super.dispose()`. Two consequences a future change must preserve: (1) anything that must run against the active sessions on teardown has to be done **inside this override**, before the dispose loop — a `this._register(toDisposable(...))` runs during `super.dispose()`, i.e. *after* `_activeSessions` has been cleared, so it sees an empty map. (2) Disposing an `AgentHostChatSession` does **not** complete the in-flight `ChatModel` request; completion is driven by the contributed-session progress autorun in `chatServiceImpl.loadRemoteSession` reacting to `isCompleteObs`. So the override calls `_settleInFlightSessions()` (sets `isCompleteObs = true`) first, otherwise the stale background model stays "in progress" and is kept alive by `ChatModel#requestInProgressKeepAlive` (the remote `clientId`-change reconnect bug, #318604).
 
 ## Changelog
+
+- **2026-07-02** — f9f2fd558a — reconciliation: added an **MCP authentication** section (`mcpAuthRequired$`, `_filterAutoGrantedMcpAuthentication` + `resolveMcpServerAuthentication`/`agentHostMcpServerId` in `agentHostAuth.ts`, the `mcpAuthenticationRequired` progress part and its run-id guard against stale async completions, from commit `17c6cd4836d`). Updated **Subagent rendering** — nested (depth ≥ 2) subagents are now recursively observed and grouped under a `rootInvocationId`, no longer gated on the `subagent_started` discovery block having arrived first. Updated **Request context and client-tool parity** for implicit active-editor forwarding + unsaved/dirty-editor inlining and Copilot-CLI-scoped session-reference/trajectory attachments, and noted the client-tool-stall fix (`_beginClientToolInvocation` always dispatches a terminal `ChatToolCallComplete`). Added a turn-timings (`StopWatch`/`IChatAgentResult.timings`) note under **Cost and usage aggregation**, and a **What it owns** bullet for the per-turn file-changes-summary provider registration (`AgentHostResponseFileChangesProvider`). Softened the selection-attachment debt entry to reflect partial resolution. Standardized "Agents app"/"Sessions app" wording to "agent window".
 
 - **2026-06-27** — 5edb399a83 — `AgentHostSessionHandler.dispose()` now calls `_settleInFlightSessions()` before tearing down `_activeSessions`, completing any session whose turn is still in flight. Fixes a remote reconnect bug (#318604) where a `clientId` change disposed the handler, the in-flight turn never completed, and `ChatModel#requestInProgressKeepAlive` kept the stale background model alive so reopening reused it instead of re-resolving through `provideChatSessionContent`. Added a "Patterns and gotchas" body bullet and a gotcha on the manual `dispose()` override (registered disposables run after `_activeSessions` is cleared; disposing a session does not complete its ChatModel request).
 

@@ -12,7 +12,7 @@ The defining property of AHP is that the agent runs without a client. Clients ar
 
 ## Terminology and comparison points
 
-When Rob says **Agent Host**, he usually means the new AHP-backed implementation in VS Code core: provider/process code under `src/vs/platform/agentHost/`, workbench chat adapters under `src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/`, and Sessions app providers under `src/vs/sessions/contrib/providers/agentHost/` and `src/vs/sessions/contrib/providers/remoteAgentHost/`. This is the implementation we are moving toward.
+When Rob says **Agent Host**, he usually means the new AHP-backed implementation in VS Code core: provider/process code under `src/vs/platform/agentHost/`, editor-window chat adapters under `src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/`, and agent-window providers under `src/vs/sessions/contrib/providers/agentHost/` and `src/vs/sessions/contrib/providers/remoteAgentHost/`. This is the implementation we are moving toward.
 
 When Rob says **extension-host CLI** or **extension-host Copilot CLI**, he means the older, more fully fleshed out Copilot CLI integration that runs inside the Copilot extension host. It lives in `extensions/copilot/src/extension/chatSessions/copilotcli/`, with registration in `extensions/copilot/src/extension/chatSessions/vscode-node/chatSessions.ts`. Useful comparison anchors:
 
@@ -34,7 +34,7 @@ Use the extension-host CLI as a parity and product-behavior reference, especiall
 - **Correct wrong shapes while AHP is pre-v1.** Breaking protocol changes are acceptable before v1 when they make the model simpler, more semantic, or better placed. Update the in-tree provider/client path coherently; do not add compatibility scaffolding just to preserve a bad shape.
 - **Prefer explicit shared semantics over client inference.** If multiple clients or surfaces need to understand the same meaning, make that meaning part of AHP state, actions, commands, or errors. Do not force every client to reverse-engineer behavior from generic events or incidental fields.
 - **Keep well-known conventions minimal.** A narrow convention is acceptable when it supports a real UX/product need, is documented in one place, and degrades gracefully for agents that do not participate. Do not treat existing conventions as permission to add more stringly coupling by default.
-- **Put truth at the layer that owns it.** Durable session facts that are part of the agent/client contract should live in AHP state. VS Code workbench and Sessions app code should adapt, cache, or view-model that truth unless the state is truly local to one surface.
+- **Put truth at the layer that owns it.** Durable session facts that are part of the agent/client contract should live in AHP state. Editor-window and agent-window code should adapt, cache, or view-model that truth unless the state is truly local to one surface.
 - **Keep UI adapters honest.** Design AHP independently of VS Code UI. Then map AHP concepts into existing chat/session UX where the mapping is honest; if the protocol concept is real and VS Code lacks the right UI shape, adapt the UI layer rather than distorting the protocol.
 - **Fail explicitly for contract violations.** Required AHP contracts should fail with typed errors or visible diagnostics when violated. Silent fallbacks are for intentional optional behavior, not for broken required behavior.
 - **Prefer the simplest faithful model.** Future-oriented design is good when it names a stable domain concept. Avoid speculative abstraction, generic escape hatches, or provider matrices that are not yet justified by real workflow pressure.
@@ -54,6 +54,8 @@ Push back on protocol or API shapes that put a concept at the wrong layer, mirro
 - This is not a substitute for reading code and relevant docs. The code remains the source of truth; this doc biases judgment under ambiguity.
 
 ## Changelog
+
+- **2026-07-02** — f9f2fd558a — reconciliation: standardized terminology — the `/sessions/` surface is now called the **agent window** and the `/workbench/` surface the **editor window** in this doc's terminology section (replacing "Sessions app" / "VS Code workbench" wording); no principle changes. The broad set of commits since baseline (protocol flattening, multi-chat/BYOK/telemetry work) are concrete applications of existing principles and are covered at finer grain by [agent-host-topology](./agent-host-topology.md), [agent-host-protocol](./agent-host-protocol.md), and [agent-host-telemetry](./agent-host-telemetry.md).
 
 - **2026-06-25** — 09c18fe5c5 — reconciliation: no principle changes. The channel-based AHP wire model, multi-chat sessions, multiple active clients, the rich error model, the three-agent (Copilot/Claude/Codex) topology, and the changeset/annotations services are all concrete applications of the existing ownership/layering/"neither side is VS Code" principles — no new cross-cutting principle introduced.
 

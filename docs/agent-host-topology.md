@@ -54,7 +54,7 @@ The cardinal rule:
 
 > **Neither the client nor the server in AHP is "VS Code." Either could be someone else's implementation.**
 
-Concretely, an AHP server might be the local utility process we ship, a Copilot agent runtime over a tunnel, a third-party vibe-coded WebSocket server. An AHP client might be the VS Code workbench, the Agents app, a CLI, someone else's IDE. Every protocol decision must work for all four corners of that matrix.
+Concretely, an AHP server might be the local utility process we ship, a Copilot agent runtime over a tunnel, a third-party vibe-coded WebSocket server. An AHP client might be the editor window, the agent window, a CLI, someone else's IDE. Every protocol decision must work for all four corners of that matrix.
 
 This is why the protocol's data model is so deliberately neutral:
 
@@ -116,10 +116,10 @@ This rule is the natural complement to the cardinal rule. "Neither side is VS Co
 
 Before the apps and configurations, there are two **axes of code sharing** to keep straight:
 
-1. **Server side vs. client side.** Server-side code (everything under `src/vs/platform/agentHost/node/`, plus what runs *inside* the agent host process — `IAgent` implementations, `AgentService`, transports, persistence) is **inherently shared**. Neither "the IDE" nor "the Agents app" exists at this layer; the server is just the AHP host.
-2. **For client-side code, who consumes it.** Client-side code splits into VS Code-specific (`vs/workbench/contrib/...`), Agents-app-specific (`vs/sessions/contrib/...`), and shared (`vs/workbench` or `vs/platform`, consumed by both).
+1. **Server side vs. client side.** Server-side code (everything under `src/vs/platform/agentHost/node/`, plus what runs *inside* the agent host process — `IAgent` implementations, `AgentService`, transports, persistence) is **inherently shared**. Neither the editor window nor the agent window exists at this layer; the server is just the AHP host.
+2. **For client-side code, who consumes it.** Client-side code splits into editor-window-specific (`vs/workbench/contrib/...`), agent-window-specific (`vs/sessions/contrib/...`), and shared (`vs/workbench` or `vs/platform`, consumed by both).
 
-The two-pickers example in [agent-host-auto-approve-picker](./agent-host-auto-approve-picker.md) is *not* duplicated UI — it's two distinct client-side surfaces (workbench chat input toolbar vs. Agents-app new-chat page) sharing a model-layer delegate. Expect more of this pattern, not less. Trying to unify the views would produce a worse abstraction than the duplication; the shared delegate is the seam that matters.
+The two-pickers example in [agent-host-auto-approve-picker](./agent-host-auto-approve-picker.md) is *not* duplicated UI — it's two distinct client-side surfaces (editor-window chat input toolbar vs. agent-window new-chat page) sharing a model-layer delegate. Expect more of this pattern, not less. Trying to unify the views would produce a worse abstraction than the duplication; the shared delegate is the seam that matters.
 
 ### Deployment shells
 
@@ -127,7 +127,7 @@ The server-side code has **two entry points** today, each a different deployment
 
 | Entry point | Transport | Spawned by | Lifecycle owner |
 |---|---|---|---|
-| `src/vs/platform/agentHost/node/agentHostMain.ts` | MessagePort over utility-process IPC | VS Code / Agents app main process | Workbench (parent process) |
+| `src/vs/platform/agentHost/node/agentHostMain.ts` | MessagePort over utility-process IPC | editor window / agent window main process | Workbench (parent process) |
 | `src/vs/platform/agentHost/node/agentHostServerMain.ts` | WebSocket | A launcher (tunnel, SSH wrapper, dev script) | The launcher / SIGTERM |
 
 When reading code, identify which shell it runs in — it determines transport, lifecycle, signal handling, and whether the parent process even exists. Shared host-process services such as logging, OTel, and product telemetry are created by both shells and then passed into the shared server-side DI graph; see [agent-host-telemetry](./agent-host-telemetry.md) for the telemetry-specific bootstrap and disablement rules.
@@ -138,10 +138,10 @@ The VS Code repo ships **two apps** that share most of the agent-host code:
 
 | App | Source root | Local agent host | Remote agent hosts |
 |---|---|---|---|
-| **VS Code** (the IDE) | `src/vs/workbench/` | ✅ yes | ❌ no |
-| **Agents app** (still in `src/vs/sessions/`) | `src/vs/sessions/` | ✅ yes | ✅ yes (one or more) |
+| **Editor window** (VS Code) | `src/vs/workbench/` | ✅ yes | ❌ no |
+| **Agent window** (still in `src/vs/sessions/`) | `src/vs/sessions/` | ✅ yes | ✅ yes (one or more) |
 
-> **Naming gotcha:** the Agents app code is still rooted at `src/vs/sessions/`. The product was renamed from "Sessions" to "Agents" but the directory was not. See [`src/vs/sessions/README.md`](#) for the layer's own description ("Agentic Window"). The directory name is `sessions/`; the product is "Agents." When in doubt, search for both terms.
+> **Naming gotcha:** the agent window's code is still rooted at `src/vs/sessions/`. The product surface has been named "Sessions," then "Agents," and is called the **agent window** in this knowledge base; the directory was never renamed to match. See [`src/vs/sessions/README.md`](#) for the layer's own current self-description ("Agents Window"). The directory name is `sessions/`; when searching the codebase for this surface, expect to find "sessions," "Agents," and "agent window" all in use — they refer to the same layer.
 
 The layering rule between the two apps is enforced by ESLint:
 
@@ -150,41 +150,41 @@ vs/sessions  may import from  vs/workbench  ✅
 vs/workbench may import from  vs/sessions   ❌  (forbidden)
 ```
 
-So shared agent-host code lives under `vs/workbench` (or `vs/platform`), and the Agents app extends or composes it via its own contributions under `vs/sessions/contrib/`.
+So shared agent-host code lives under `vs/workbench` (or `vs/platform`), and the agent window extends or composes it via its own contributions under `vs/sessions/contrib/`.
 
 ### The three configurations
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ A. VS Code + local agent host                                    │
-│    [VS Code workbench] ──MessagePort── [local utility process]   │
+│ A. Editor window + local agent host                              │
+│    [editor window] ──MessagePort── [local utility process]       │
 │    AgentHostContribution registers one chat session type per     │
 │    advertised agent. connectionAuthority: 'local'.               │
 └──────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
-│ B. Agents app + local agent host                                 │
-│    [Agents workbench] ──MessagePort── [local utility process]    │
-│    Same underlying handler/contribution code as (A); different   │
-│    workbench layout (vs/sessions) and session list UI.           │
+│ B. Agent window + local agent host                                │
+│    [agent window] ──MessagePort── [local utility process]         │
+│    Same underlying handler/contribution code as (A); different    │
+│    workbench layout (vs/sessions) and session list UI.            │
 └──────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
-│ C. Agents app + one or more remote agent hosts                   │
-│    [Agents workbench] ──WebSocket/SSH/Tunnel── [remote AHP srv]  │
-│    RemoteAgentHostContribution registers one chat session type   │
-│    per (remote × agent) pair. connectionAuthority: <sanitized    │
-│    remote name>. Multiple remotes coexist.                       │
+│ C. Agent window + one or more remote agent hosts                  │
+│    [agent window] ──WebSocket/SSH/Tunnel── [remote AHP srv]       │
+│    RemoteAgentHostContribution registers one chat session type    │
+│    per (remote × agent) pair. connectionAuthority: <sanitized     │
+│    remote name>. Multiple remotes coexist.                        │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-VS Code (the IDE) gets configuration A only. The Agents app gets B and any number of C. There is no "VS Code + remote agent host" configuration today.
+The editor window gets configuration A only. The agent window gets B and any number of C. There is no "editor window + remote agent host" configuration today.
 
-### Remote host scoping in the Agents app
+### Remote host scoping in the agent window
 
-When the Agents app runs in web with remote agent hosts, the active host is also a piece of app chrome, not protocol state. `AgentHostFilterService` (`src/vs/sessions/services/agentHostFilter/browser/agentHostFilterService.ts`) watches registered remote `IAgentHostSessionsProvider`s, tracks their connection statuses, persists the selected provider id, and exposes reconnect/disconnect commands. `HostFilterActionViewItem` renders that state as the titlebar host dropdown.
+When the agent window runs in web with remote agent hosts, the active host is also a piece of app chrome, not protocol state. `AgentHostFilterService` (`src/vs/sessions/services/agentHostFilter/browser/agentHostFilterService.ts`) watches registered remote `IAgentHostSessionsProvider`s, tracks their connection statuses, persists the selected provider id, and exposes reconnect/disconnect commands. `HostFilterActionViewItem` renders that state as the titlebar host dropdown.
 
-The selected provider id scopes Agents-app surfaces that need a single host context: `sessionsList.ts` filters the sessions list to the selected provider, and `webWorkspacePicker.ts` filters workspace choices to the same provider (with a phone-layout bottom-sheet variant on web). This is deliberately above `IAgentConnection`: the protocol still sees independent remote hosts, while the app decides which host the user is currently looking at.
+The selected provider id scopes agent-window surfaces that need a single host context: `sessionsList.ts` filters the sessions list to the selected provider, and `webWorkspacePicker.ts` filters workspace choices to the same provider (with a phone-layout bottom-sheet variant on web). This is deliberately above `IAgentConnection`: the protocol still sees independent remote hosts, while the app decides which host the user is currently looking at.
 
 ### The shared seam: `IAgentConnection` and `AgentHostSessionHandler`
 
@@ -207,7 +207,7 @@ new AgentHostSessionHandler({
 
 The only differences across configurations:
 
-- **`sessionType`** — local uses `agent-host-${provider}`; remote uses `remoteAgentHostSessionTypeId(remoteName, provider)`. This keeps each (host × agent) pair as a distinct session type in the chat sessions registry. Note: this is the *chat sessions registry* type — distinct from the **Sessions-app `ISession.sessionType`** (which is `agent.provider` itself, e.g. `copilotcli`, so the same agent shares one logical type across hosts). See [agent-host-sessions-providers](./agent-host-sessions-providers.md#session-type-id-vs-resource-scheme).
+- **`sessionType`** — local uses `agent-host-${provider}`; remote uses `remoteAgentHostSessionTypeId(remoteName, provider)`. This keeps each (host × agent) pair as a distinct session type in the chat sessions registry. Note: this is the *chat sessions registry* type — distinct from the **agent-window `ISession.sessionType`** (which is `agent.provider` itself, e.g. `copilotcli`, so the same agent shares one logical type across hosts). See [agent-host-sessions-providers](./agent-host-sessions-providers.md#session-type-id-vs-resource-scheme).
 - **`connectionAuthority`** — used by file-system and URI services to scope which Agent Host owns a given resource URI. Local resources live under authority `'local'`; remote resources live under the sanitized remote name.
 - **`connection`** — `MessagePortConnection` for local, one of the WebSocket / SSH / tunnel transports for remote.
 
@@ -246,8 +246,8 @@ The decision tree, in order:
 1. **Is it a contract change** (new state field, new action, new capability)? → It belongs in [`agent-host-protocol`](https://github.com/microsoft/agent-host-protocol) first, then regenerate `state/protocol/` here. See [agent-host-protocol](./agent-host-protocol.md).
 2. **Is it a new well-known convention** (property name, tool kind)? → Document it in the agent-host-protocol repo's conventions section; implement the recognition in the relevant VS Code adapter (the renderer for tool kinds; the appropriate UI for config property names). Don't put the well-known names into the protocol's TypeScript types.
 3. **Does it run a turn or render session state?** → `AgentHostSessionHandler` (works in all three configurations). See [agent-host-session-handler](./agent-host-session-handler.md).
-4. **Is it about *which* agents/sessions exist or how they're listed?** → Start at the provider/listing owner. SDK-backed local agents, for example, should filter or adopt sessions in the provider (`CopilotAgent.listSessions`) before generic `AgentService` aggregation or UI providers see them. Registration/list UI belongs in a `*Contribution` (`AgentHostContribution` for local; `RemoteAgentHostContribution` for remote) and a `*SessionsProvider` (Agents app only).
-5. **Is it Agents-app-only chrome** (sidebar, sessions view, titlebar host filter)? → `src/vs/sessions/contrib/`.
+4. **Is it about *which* agents/sessions exist or how they're listed?** → Start at the provider/listing owner. SDK-backed local agents, for example, should filter or adopt sessions in the provider (`CopilotAgent.listSessions`) before generic `AgentService` aggregation or UI providers see them. Registration/list UI belongs in a `*Contribution` (`AgentHostContribution` for local; `RemoteAgentHostContribution` for remote) and a `*SessionsProvider` (agent window only).
+5. **Is it agent-window-only chrome** (sidebar, sessions view, titlebar host filter)? → `src/vs/sessions/contrib/`.
 6. **Is it a workbench setting** (`chat.agentHost.*` or any `IConfigurationService.getValue()` key) read in code that runs outside the renderer? → Register it in a platform-level `*.config.contribution.ts` file under `src/vs/platform/agentHost/common/`, then side-effect-import that file from each module that reads the key. The `IConfigurationRegistry` is per-process; registering in `chat.shared.contribution.ts` alone covers only the renderer. Today's split: `agentHost.config.contribution.ts` holds `chat.agentHost.enabled` (read in `app.ts`; side-effect-imported by `electronAgentHostStarter.ts` so it travels in via `app.ts`'s import of the starter class); `agentHostStarter.config.contribution.ts` holds the seven starter-consumed keys (`chat.agentHost.claudeAgent.path` + 6 `chat.agentHost.otel.*`, side-effect-imported by both starters). Renderer-only keys (e.g. `chat.agentHost.ipcLoggingEnabled`, `chat.agentHost.ahpJsonlLoggingEnabled`, `chat.agentHost.customTerminalTool.enabled`) stay inline in `chat.shared.contribution.ts`. Each contribution file is also side-effect-imported from `chat.shared.contribution.ts` so the renderer settings UI sees every key. See the `## Debt & gotchas` entry for the per-process registry rule.
 7. **Is it host-level or per-session configuration** (a new well-known config key, a new way to view or edit values)? → The platform-side schema + key list lives in `src/vs/platform/agentHost/common/sessionConfigKeys.ts` and `agentHostSchema.ts`; server-side `session → parent subagent → host` resolution lives in `src/vs/platform/agentHost/node/agentConfigurationService.ts` (`IAgentConfigurationService.getEffectiveValue`); UI editors for the synthetic per-session and host-level JSONC files live in `src/vs/sessions/contrib/providers/agentHost/browser/agentSessionSettings.contribution.ts` and `agentHostSettings.contribution.ts`. See [agent-host-sessions-providers](./agent-host-sessions-providers.md#settings-editor-file-system-providers).
 8. **Is it server-side product telemetry** (a fact that happens inside the host process, such as a message being handed to an agent)? → Put event reporting below UI adapters in `src/vs/platform/agentHost/node/` and keep GDPR event definitions in a focused helper such as `AgentHostTelemetryReporter`. See [agent-host-telemetry](./agent-host-telemetry.md).
@@ -294,7 +294,7 @@ This is an instance of a broader principle: **protocol-level uniformity beats SD
 
 ### Workspace lives where the agent runs
 
-In configuration C (Agents app + remote agent host), file edits land on the **remote machine**, not on the client. The agent is self-contained and acts on the workspace it sits next to; the client is a viewer/controller that observes via state actions and accesses files through the `AGENT_CLIENT_SCHEME` virtual filesystem provider proxy.
+In configuration C (agent window + remote agent host), file edits land on the **remote machine**, not on the client. The agent is self-contained and acts on the workspace it sits next to; the client is a viewer/controller that observes via state actions and accesses files through the `AGENT_CLIENT_SCHEME` virtual filesystem provider proxy.
 
 Worktrees, checkpoints, diffs, and any other workspace-bound state all live on the agent's side. The client never holds the authoritative copy.
 
@@ -312,6 +312,10 @@ The agent host often needs to call back into the renderer to access client-side 
 
 Reverse filesystem RPCs from a **remote** Agent Host are also permissioned before they touch the client's `IFileService`. `RemoteAgentHostProtocolClient` checks `IAgentHostPermissionService` for `resourceRead`, `resourceList`, `resourceWrite`, `resourceDelete`, and `resourceMove`; denied operations return typed `PermissionDenied` (-32009) with `PermissionDeniedErrorData.request`, so the host can send `resourceRequest` and retry after approval. The prompt is surfaced by `AgentHostPermissionUiContribution` above the chat input with Deny / Allow / Always Allow actions. Always-Allow grants persist in `chat.agentHost.localFilePermissions`; implicit read grants are registered for customization URIs the client sends to the host so plugin sync does not prompt.
 
+### BYOK models are served by whichever window is connected
+
+BYOK (bring-your-own-key) language models are another reverse-RPC surface, and they follow the "either window can serve" pattern rather than being editor-window-only or agent-window-only. Both the editor window and the agent window register `IAgentHostByokLmHandler` (mirroring each other), because BYOK models are a property of the user's installed extensions — not of a particular window. `ByokLmBridgeRegistry` (`src/vs/platform/agentHost/node/byokLmBridgeRegistry.ts`) tracks every connected window, caches each one's models, and treats a connection as "serving" once its `listModels()` resolves; it prefers a serving connection that actually has models so a still-starting window can't shadow a populated peer. This matters most for configuration C, where the agent window may be the *only* connected window and must be able to serve BYOK back to the node host on its own — the registration is deliberately defensive (wrapped in try/catch) so a window that fails to bind the handler still comes up instead of losing its agent host connection entirely.
+
 
 
 Auth is split across four layers, and each layer is ignorant of the others:
@@ -321,7 +325,7 @@ Auth is split across four layers, and each layer is ignorant of the others:
 | Agent SDK (Copilot, Claude, ...) | Token storage, refresh, OAuth dance, browser/dialog UI |
 | Agent host (provider) | Surfacing \"we need auth\" via `AHP_AUTH_REQUIRED` (-32007) |
 | AHP renderer client | Orchestrating the retry-after-auth loop via `authenticationPending` autorun |
-| Workbench / Agents-app UI | Showing the user the auth prompt (when not handled by the SDK directly) |
+| Editor window / agent window UI | Showing the user the auth prompt (when not handled by the SDK directly) |
 
 The protocol's `protectedResources.required: true` + `AHP_AUTH_REQUIRED` throw is the **only contract** between the agent host and the renderer client \u2014 everything above it can be agent-agnostic, everything below it can be client-agnostic. New `IAgent` implementations (Claude, etc.) plug into the same mechanism without per-agent customization in the host.
 
@@ -345,7 +349,6 @@ A short list of the values that drive design decisions in the agent host. When i
 - **gotcha** (2026-04-29, agentHostMain.ts:onDidAddConnection + agentHostClientResourceChannel.ts) — local AH reverse-RPC for client-side filesystems goes through `AgentHostClientResourceChannel`, NOT through bundling to disk. The remote AH path gets reverse requests for free via bidirectional AHP WebSocket; the local AH path needs an explicit server channel registered on the renderer's `MessagePortClient`. If a new client-side resource needs to be readable by local AH, extend this channel. Bypassing it (e.g. writing to a temp file) defeats the virtual-bundle abstraction and breaks the local/remote parity.
 - **gotcha** (2026-04-23, agentHostServerMain.ts:shutdown) — the shutdown path closes `wsServer` first, then awaits `sessionDataService.whenIdle()` (capped at 3s) before disposing. This is load-bearing: a `setMetadata` write in flight when SIGTERM arrives can drop the latest `configValues`/`customTitle`/`isRead`/`isDone`/`diffs` value, which the "Session Config persistence across restarts" integration test guards against. Don't "clean up" by removing the flush or shrinking the timeout casually — reorder only with the same per-session-DB flush guarantee in mind.
 - **gotcha** (2026-04-23, copilotAgent.ts:listSessions database-existence gate) — the provider intentionally filters SDK-reported sessions down to only those with a metadata DB entry. The metadata DB is **not** rebuildable from SDK data; it's an independent record of host-side decisions. Don't relax the gate to "show everything the SDK knows about" without an explicit design conversation — the answer there is degrade-without-metadata, not rebuild-from-SDK.
-- **debt** (2026-04-23, src/vs/platform/agentHost/node/copilot/copilotAgent.ts) — `CopilotAgent` is product-specific code under `vs/platform`, which by VS Code convention is meant to be product-neutral. It can't move to `vs/workbench/contrib/` (the agent host server runs in its own process and can't import from workbench). The pragmatic home, when a second `IAgent` lands (e.g. Claude), is `src/vs/platform/agentHost/node/contrib/<vendor>/...` — mirroring the workbench `contrib/` convention to mark provider-specific code, even though `vs/platform` doesn't have a precedent for it. Today's location is fine; revisit if/when a second `IAgent` arrives.
 - **gotcha** (2026-04-22, agentHostChatContribution.ts:_authenticateWithServer / remoteAgentHost.contribution.ts:_authenticateWithConnection) — `RootStateSubscription.onDidChange` fires on **every** applied action (snapshot, optimistic, reconcile, applyAction), not only when `protectedResources` changes. Any handler wired to `rootState.onDidChange` that issues a network call or expensive work must dedupe that work on its own — never assume the event fires only on meaningful value changes.
 - **gotcha** (2026-04-22, agentHostAuth.ts:AgentHostAuthTokenCache) — the token cache must be seeded **after** the `authenticate()` RPC succeeds, never before. If seeded before, a transient RPC failure poisons the cache entry and suppresses all future retries. On any throw, call `cache.clear(resource)` to evict the entry. Additionally, the whole cache must be cleared on `onAgentHostStart` because the agent host process can restart and lose its in-memory auth state even while the client token is numerically unchanged.
 - **gotcha** (2026-04-19, agentHostMain.ts / agentHostServerMain.ts) — the agent-host child process registers ONLY `INativeEnvironmentService`, not `IEnvironmentService` (the base token). All consumers in the child process use the native token. The parent-process starter (`nodeAgentHostStarter.ts`) runs in the main Electron process's DI container and does use `IEnvironmentService`, but that's a different container — don't confuse the two. Other VS Code processes may register both tokens; the agent host is native-only.
@@ -353,6 +356,8 @@ A short list of the values that drive design decisions in the agent host. When i
 - **gotcha** (2026-04-22, *RelayTransport.dispose) — relay-transport `dispose()` implementations are responsible for telling the shared-process side to close the underlying connection. `TunnelRelayTransport.dispose()` and `TunnelConnectionTransport.dispose()` both do this; `SSHRelayTransport.dispose()` historically did NOT (it only removed IPC listeners), which is why removing an SSH-backed remote leaked the tunnel until the SSH renderer started passing its own `transportDisposable` that calls `_mainService.disconnect(connectionId)`. If you add a new relay transport, make sure its `dispose()` either closes the shared-process connection itself or that the renderer that owns it passes a `transportDisposable` that does.
 
 ## Changelog
+
+- **2026-07-02** — f9f2fd558a — reconciliation: standardized terminology throughout — the `/sessions/` surface is now called the **agent window** and the `/workbench/` surface the **editor window** (replacing "Agents app" / "Agents-app" / "VS Code workbench" wording); corrected the naming-gotcha's misquoted "Agentic Window" to match the current `src/vs/sessions/README.md` self-description ("Agents Window"). Added a "BYOK models are served by whichever window is connected" note (`066a708cac2`, `44ddb887890`, `483c5416c6d`) — `ByokLmBridgeRegistry` now tolerates multiple connected windows instead of a single "most recently active" one, and the agent window registers a defensive (try/catch-wrapped) BYOK handler so it can serve BYOK models on its own in configuration C. Pruned the obsolete "revisit when a second `IAgent` lands" debt now that Copilot, Claude, and Codex have established the provider-folder layout.
 
 - **2026-06-25** — 09c18fe5c5 — reconciliation: there are now **three** in-tree first-party `IAgent` implementations — added a table for `CopilotAgent` (always on), `ClaudeAgent` (`chat.agentHost.claudeAgent.enabled`, default ON; Anthropic SDK via Copilot proxy or native BYOK), and `CodexAgent` (`chat.agentHost.codexAgent.enabled`, default OFF; `app-server` child process over JSON-RPC/NDJSON), all registered via `AgentService.registerProvider` with a `_defaultProvider` fallback and wired in both server entry shells. Updated the persistence note (Claude/Codex backends now real, not "planned"). The protocol-philosophy and topology principles otherwise still hold; the channel-based wire model and multi-chat sessions are covered in [agent-host-protocol](./agent-host-protocol.md), and the sessions-services rename (`ISessionsProvidersService` / `ISessionsManagementService` / `ISessionsService` / `ISessionsPartService` / `ISessionGroupsService`) plus grouping / drag-reorder / multi-delete in [agent-host-sessions-providers](./agent-host-sessions-providers.md).
 

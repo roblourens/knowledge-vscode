@@ -2,7 +2,7 @@
 
 _Covers: src/vs/platform/agentHost/browser/remoteAgentHostProtocolClient.ts, src/vs/platform/agentHost/browser/webSocketClientTransport.ts, src/vs/platform/agentHost/test/electron-browser/remoteAgentHostProtocolClient.test.ts, src/vs/platform/agentHost/test/electron-browser/remoteAgentHostService.test.ts_
 
-`RemoteAgentHostProtocolClient` is the browser-side `IAgentConnection` implementation for one remote Agent Host. It sits below the Agents app's remote Sessions provider and above a concrete transport (`WebSocketClientTransport`, SSH relay, or tunnel relay). Consumers should treat it like any other `IAgentConnection`: initialize, subscribe, dispatch, create/list/dispose sessions, and read state through `AgentSubscriptionManager`.
+`RemoteAgentHostProtocolClient` is the browser-side `IAgentConnection` implementation for one remote Agent Host. It sits below the agent window's remote sessions provider and above a concrete transport (`WebSocketClientTransport`, SSH relay, or tunnel relay). Consumers should treat it like any other `IAgentConnection`: initialize, subscribe, dispatch, create/list/dispose sessions, and read state through `AgentSubscriptionManager`.
 
 For the broader local/remote topology, start with [agent-host-topology](./agent-host-topology.md). For the protocol contract and generated command/action types, see [agent-host-protocol](./agent-host-protocol.md).
 
@@ -46,13 +46,13 @@ Transport JSONL logging is wired around this client by the remote service when A
 
 ## Client-fed root config
 
-After a successful handshake, the remote client may send client-environment facts that the host process needs as root config state. Telemetry level is the first such key: the client dispatches `root/configChanged` with the schema-known string enum `telemetryLevel` value so a remote Agent Host can clamp product telemetry off when any connected VS Code client has disabled telemetry. This is fire-and-forget host input, not optimistic user session history; use the non-optimistic dispatch path with `clientSeq: 0`.
+After a successful handshake, the remote client feeds several client-environment/settings facts into the host process as root config state, all dispatched the same way: `root/configChanged` with a schema-known key on connect and again whenever the underlying VS Code setting changes, via the non-optimistic dispatch path (`clientSeq: 0`) since this is fire-and-forget host input, not optimistic user session history. Telemetry level was the first such key; the pattern has since grown into the general mechanism for forwarding renderer-resolved settings/experiments to the (experiment-blind) spawning process — current keys include `telemetryLevel`, `sessionSyncEnabled`, `terminalAutoApproveEnabled`/`terminalAutoApproveRules`, `globalAutoApproveEnabled`, `autoReplyEnabled` (`chat.autoReply`, `AH: respect chat.autoReply`), and `codexAgentEnabled` (`AH: forward codex enablement so the experiment can enable it` — forwards the renderer's experiment-resolved value for `chat.agentHost.codexAgent.enabled`, since the main/server process that spawns the agent host doesn't evaluate experiments itself). Each key follows the same `_update*Enabled()`-style method: read the current `IConfigurationService` value, dispatch unconditionally on connect, and re-dispatch on the matching `onDidChangeConfiguration` event.
 
-For the privacy and disablement rules, see [agent-host-telemetry](./agent-host-telemetry.md#disablement-and-telemetry-level-propagation).
+For the privacy and disablement rules specific to telemetry, see [agent-host-telemetry](./agent-host-telemetry.md#disablement-and-telemetry-level-propagation).
 
 ## Session creation URI ownership
 
-`createSession(config?)` must preserve a client-provided `config.session`. The VS Code side now chooses the AHP session URI before asking a remote Agent Host to create the session: the chat/session resource already contains the raw id, and `AgentHostSessionHandler` passes `session: AgentSession.uri(provider, rawId)` through `IAgentConnection.createSession(...)`. The remote protocol client should generate `AgentSession.uri(provider, generateUuid())` only when `config.session` is absent.
+`createSession(config?)` must preserve a client-provided `config.session`. The VS Code side now chooses the AHP session URI before asking a remote Agent Host to create the session: the chat/session resource already contains the raw id, and `AgentHostSessionHandler` passes `session: AgentSession.uri(provider, rawId)` through `IAgentConnection.createSession(...)`. The remote protocol client should generate `AgentSession.uri(provider, generateUuid())` only when `config.session` is absent. Note that `CreateSessionParams` no longer carries a `model` field — model/agent selection now rides on messages, not on session creation (see [agent-host-protocol § Multi-chat sessions](./agent-host-protocol.md#multi-chat-sessions)).
 
 This keeps local and remote creation consistent: the client determines the chat session URI over AHP, and the server/remote path honors it. If the remote client ignores `config.session` and generates a different URI, the handler's mismatch check will fail; that is a contract violation, not an id-remapping case.
 
@@ -93,11 +93,12 @@ The 2026-04-21 audit intentionally fixed only request lifecycle and structured e
 ## Debt & gotchas
 
 - **gotcha** (2026-04-30, remoteAgentHostProtocolClient.ts:createSession) - preserve `config.session` when present. The client owns the AHP URI for non-fork session creation; generate a URI only as a fallback for callers that did not request one.
-- **debt** (2026-04-21, remoteAgentHostProtocolClient.ts:connect) - remote reconnect still behaves like a fresh `initialize`; it does not use AHP replay/snapshot reconnect semantics with stable subscriptions and `lastSeenServerSeq`.
 - **debt** (2026-04-21, webSocketClientTransport.ts:onClose) - WebSocket/SSH/tunnel relay close semantics are still not covered by a shared transport test matrix; add once-gated close, malformed-frame, send-after-close, and dispose-trigger tests before refactoring transport behavior.
 - **gotcha** (2026-04-21, remoteAgentHostProtocolClient.ts:dispose) - disposal must call `_handleClose(disposed)` before `super.dispose()` so `_onDidClose` is still live for `_raceClose()` listeners, and so intentional client disposal wins over transports that emit `onClose` during disposal.
 
 ## Changelog
+
+- **2026-07-02** — f9f2fd558a — reconciliation: updated for the flattened `SessionState` protocol (`4678a09ff4a`) — `createSession`/`createChat` no longer send bare `model` params (model/agent now ride on `Message`), and `listSessions` parses `SessionSummary.createdAt`/`modifiedAt` as ISO-8601 strings via `Date.parse()`. Generalized "Client-fed root config" beyond `telemetryLevel` to the now-general fire-and-forget settings-forwarding pattern, adding `autoReplyEnabled` (`afc6859cd3e`) and `codexAgentEnabled` (`76d909c04ef`, forwarding the renderer's experiment-resolved Codex enablement to the experiment-blind spawning process) as the newest instances alongside the pre-existing session-sync / terminal-auto-approve / global-auto-approve keys. Replaced "Agents app" wording with "agent window" and pruned the resolved pre-soft-reconnect debt entry.
 
 - **2026-06-25** — 09c18fe5c5 — reconciliation: the remote client's reverse-RPC, permission-gating, and root-config dispatch architecture still holds. It now also rides the channel-based wire model and multi-chat sessions (chat content arrives on the chat channel) and multiple active clients per session — see [agent-host-protocol](./agent-host-protocol.md). No change to the post-handshake telemetry-level dispatch behavior documented below.
 
