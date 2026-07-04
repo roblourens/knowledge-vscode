@@ -13,6 +13,7 @@ For each chat session backed by an Agent Host, the handler:
 - **Renders state into chat history and progress** by adapting `ISessionState` updates into chat content parts and progress messages.
 - **Handles active-turn reconnection** — if the workbench reattaches mid-turn (after reload, host change, or network blip), the handler resumes rendering from the protocol's replay/snapshot.
 - **Handles server-initiated turns** — turns the agent starts on its own, not in response to a user message.
+- **Renders system notifications** — both notifications embedded as response parts in an active turn and notifications represented as system-origin turns. See [agent-host-system-notifications](./agent-host-system-notifications.md).
 - **Dispatches cancellations** back through the protocol.
 - **Renders permission prompts** (tool/file approvals) as VS Code permission UI and forwards the user's choice back as an action. When the server includes `ConfirmationOption[]` on a confirmation action/state, the handler surfaces those choices (e.g. "Allow Once" / "Allow in this Session") instead of plain approve/deny and echoes back `selectedOptionId` on the answer.
 - **Hosts client tools** — tools the workbench provides to the session (allowlist controlled via `chat.agentHost.clientTools`); see `agentHostClientTools.ts`.
@@ -101,6 +102,7 @@ Client tools are already generic: `_dispatchActiveClient` sends the active clien
 ## Patterns and gotchas
 
 - **Active-turn reconnect** is the most subtle behavior. If you change how a turn renders, exercise reload-during-turn paths in tests under `agentHostChatContribution.test.ts`.
+- **Live response-part observation is explicit.** `turnsToHistory` and `activeTurnToProgress` cover completed history and reconnect snapshots, but newly appended parts on an already-observed turn only render when `_observeTurn` handles their `ResponsePartKind`. Any new transcript-visible response kind needs all three paths.
 - **The same handler instance does not span sessions.** Per-session state lives on the handler instance for that session.
 - **Disposables register at construction time.** Use `this._register(...)` for normal cleanup. The one deliberate exception in this file is `AgentHostChatSession.dispose()`, which fires `onWillDispose` before the registered disposables are torn down so `ContributedChatSessionData` can evict the session from chat-session caches before the emitter itself is disposed.
 - **Preserve the `IAgentConnection` abstraction.** Reach for `IAgentHostService` only when you need a local-lifecycle API (restart, etc.).
@@ -161,6 +163,7 @@ Server identity for auth purposes is `agentHostMcpServerId` (`agent-host-mcp:<au
 
 - Turn rendering, progress, history, cancellation, server-initiated turns, permissions, customization refs → `agentHostSessionHandler.ts`.
 - Adapter helpers (state → progress) → `stateToProgressAdapter.ts`.
+- System-notification live/replay/render semantics → [agent-host-system-notifications](./agent-host-system-notifications.md).
 - File edits / checkpoints → `agentHostEditingSession.ts`.
 - Client tools (definition/result conversion, allowlist) → `agentHostClientTools.ts`.
 - Auth retry behavior, MCP server identity/auto-grant resolution → `agentHostAuth.ts`.
@@ -170,6 +173,7 @@ Server identity for auth purposes is `agentHostMcpServerId` (`agent-host-mcp:<au
 See [testing](./testing.md) for the four test layers and when to use each. Tests directly relevant to this handler:
 
 - `src/vs/workbench/contrib/chat/test/browser/agentSessions/agentHostChatContribution.test.ts` — dynamic registration, session id mapping, create/subscribe, progress rendering, cancellation, errors, permission requests, history, tool rendering, attachments, dynamic discovery, config forwarding, **active-turn reconnect**, server-initiated turns, customizations.
+- `src/vs/workbench/contrib/chat/test/browser/widget/chatContentParts/chatSystemNotificationContentPart.test.ts` — persistent notification-row rendering and checked-state presentation.
 - `agentHostClientTools.test.ts` — tool definition/result conversion, allowlist filtering, active-client tool updates.
 - `src/vs/workbench/contrib/chat/test/browser/agentHost/agentHostSnapshotController.test.ts` — file-edit snapshots, undo/redo, checkpoint disablement, and request checkpoint behavior.
 - `src/vs/workbench/contrib/chat/test/browser/widget/chatContentParts/chatSubagentContentPart.test.ts` — late metadata updates (description→agent name ordering), lazy expand, current-running-tool title.
@@ -185,6 +189,7 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 
 ## Debt & gotchas
 
+- **gotcha** (2026-07-03, agentHostSessionHandler.ts:_observeTurn) — every transcript-visible `ResponsePartKind` needs an explicit live observer branch. `turnsToHistory` only restores completed turns and `activeTurnToProgress` only hydrates reconnect snapshots; neither streams a part appended after observation begins.
 - **gotcha** (2026-04-30, agentHostSessionHandler.ts:provideChatSessionContent + AgentHostSessionListController.newChatSessionItem) — Agent Host chat resources reaching the handler must be final-looking resources created by the Agent Host owner path. `/untitled-*` is only an internal contributed-chat staging URI; first send must call `IChatSessionsService.createNewChatSessionItem`, which lets `AgentHostSessionListController.newChatSessionItem` choose the real URI. If `agent-host-*:/untitled-*` reaches the handler, treat it as a bug, not as a valid draft.
 - **gotcha** (2026-04-30, agentHostSessionHandler.ts:_createAndSubscribe) — the VS Code client chooses the AHP session URI for non-fork Agent Host session creation. `_createAndSubscribe` must pass `session: AgentSession.uri(provider, rawId)` and fail if the connection returns a different URI. Do not reintroduce a UI-resource-to-backend-resource map or let the backend silently generate a different id for the same chat resource.
 
@@ -204,6 +209,7 @@ When changing the handler, run the workbench adapter tests *and* the protocol/se
 
 ## Changelog
 
+- **2026-07-03** — eea130a57e — documented system-notification ownership, the explicit live response-part observer requirement, relevant rendering coverage, and the end-to-end system-notification reference.
 - **2026-07-02** — f9f2fd558a — reconciliation: added an **MCP authentication** section (`mcpAuthRequired$`, `_filterAutoGrantedMcpAuthentication` + `resolveMcpServerAuthentication`/`agentHostMcpServerId` in `agentHostAuth.ts`, the `mcpAuthenticationRequired` progress part and its run-id guard against stale async completions, from commit `17c6cd4836d`). Updated **Subagent rendering** — nested (depth ≥ 2) subagents are now recursively observed and grouped under a `rootInvocationId`, no longer gated on the `subagent_started` discovery block having arrived first. Updated **Request context and client-tool parity** for implicit active-editor forwarding + unsaved/dirty-editor inlining and Copilot-CLI-scoped session-reference/trajectory attachments, and noted the client-tool-stall fix (`_beginClientToolInvocation` always dispatches a terminal `ChatToolCallComplete`). Added a turn-timings (`StopWatch`/`IChatAgentResult.timings`) note under **Cost and usage aggregation**, and a **What it owns** bullet for the per-turn file-changes-summary provider registration (`AgentHostResponseFileChangesProvider`). Softened the selection-attachment debt entry to reflect partial resolution. Standardized "Agents app"/"Sessions app" wording to "agent window".
 
 - **2026-06-27** — 5edb399a83 — `AgentHostSessionHandler.dispose()` now calls `_settleInFlightSessions()` before tearing down `_activeSessions`, completing any session whose turn is still in flight. Fixes a remote reconnect bug (#318604) where a `clientId` change disposed the handler, the in-flight turn never completed, and `ChatModel#requestInProgressKeepAlive` kept the stale background model alive so reopening reused it instead of re-resolving through `provideChatSessionContent`. Added a "Patterns and gotchas" body bullet and a gotcha on the manual `dispose()` override (registered disposables run after `_activeSessions` is cleared; disposing a session does not complete its ChatModel request).
