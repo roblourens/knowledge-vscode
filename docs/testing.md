@@ -60,34 +60,44 @@ node build/next/index.ts transpile   # required after editing TS
 
 **Adding a scenario:** Most new scenarios are best added by extending an existing prompt case in `ScriptedMockAgent` (`src/vs/platform/agentHost/test/node/mockAgent.ts`) — find a `case '<promptKey>':` block, then drive the new prompt from a test in the appropriate `*.integrationTest.ts` file. The `subagent` case is a worked example.
 
-### 3. Real-SDK integration tests (`*RealSdk.integrationTest.ts` + `realSdkTestHelpers.ts`)
+### 3. Bundled-provider end-to-end tests (`*AgentHostE2E.integrationTest.ts`)
 
-**What they exercise:** The full agent host **with real vendor SDKs**, against live provider endpoints. Catches problems that only surface in SDK event ordering, error shapes, and tool argument schemas (e.g. that Copilot's `task` tool emits `agent_type` not `agentName`).
+**What they exercise:** The complete Agent Host stack: a real server subprocess, the bundled Copilot / Claude / Codex SDK or CLI subprocess, real AHP over WebSocket, and real local tool execution. Only the language-model boundary is faked during normal runs. `CapiReplayProxy` serves committed normalized model replies, so the suites are deterministic, tokenless, network-free, and run in PR CI.
 
-**Where they live:** `src/vs/platform/agentHost/test/node/protocol/copilotRealSdk.integrationTest.ts` and `claudeRealSdk.integrationTest.ts`, with cross-provider scenarios in `realSdkTestHelpers.ts`. Add shared cases to the helper and provider-specific assertions to the matching provider entrypoint so env-gating, auth, and vendor quirks stay explicit.
+**Where they live:** Provider entrypoints are `copilotAgentHostE2E.integrationTest.ts`, `claudeAgentHostE2E.integrationTest.ts`, and `codexAgentHostE2E.integrationTest.ts`; shared behavior and lifecycle live in `agentHostE2ETestHelpers.ts`. `capiReplayProxy.ts` / `capiWireCodec.ts` own LLM fixtures under `captures/agentHostE2E/`. `ahpSnapshot.ts` owns executable semantic AHP snapshots under `__snapshots__/`.
 
-**How to run:** Disabled by default; gated on `AGENT_HOST_REAL_SDK=1`. **Always `unset ELECTRON_RUN_AS_NODE` first** — the runner crashes immediately at `test/unit/electron/index.js:119` (`TypeError: Cannot read properties of undefined (reading 'setPath')`) if it's set, because Electron's `app` API is stripped in node-mode and that var leaks in from VS Code / `npm`-spawned shells:
+**How to run:**
 ```sh
 unset ELECTRON_RUN_AS_NODE
-AGENT_HOST_REAL_SDK=1 ./scripts/test-integration.sh \
-  --run src/vs/platform/agentHost/test/node/protocol/copilotRealSdk.integrationTest.ts
+./scripts/test-integration.sh --run \
+  src/vs/platform/agentHost/test/node/protocol/copilotAgentHostE2E.integrationTest.ts
 ```
-Use `claudeRealSdk.integrationTest.ts` instead when you are validating the Claude provider. Add `--grep "<test name>"` to focus on a single test (`listModels`, `cd-prefix`, etc.) — without it the selected real-SDK suite runs and takes minutes.
+Add `--grep "<test name>"` to focus a scenario. Replay is the default and strict: an unrecorded model request is a hard cache miss, never a fallback to real CAPI.
 
-Auth comes from `gh auth token` by default; override with `GITHUB_TOKEN`.
+**Two recorded boundaries:**
+- The per-test LLM fixture stores normalized request summaries plus regeneratable model replies. It omits volatile token counts, normalizes temp paths / UUIDs / tool-call ids, and records the wire dialect once.
+- An AHP snapshot is an executable sequence of rounds. Each round's `clientToServer` actions are test input; `serverToClient` is expected semantic traffic, with the final server entry acting as the synchronization boundary before the next round.
 
-**Safety:** These tests really call out to a real agent that really runs tools on the developer's machine. Prompts must be carefully bounded — read-only questions, `echo` commands, isolated temp directories. **Never** ask the agent to delete, modify, or install anything outside a test-owned temp dir. The file header documents this; respect it.
+`AhpSnapshotRecorder` normalizes resource and turn ids, excludes high-frequency environment-dependent notifications, and coalesces `chat/responsePart` plus `chat/delta` into final content. This semantic normalization is what lets the same AHP snapshot describe both live recording and deterministic replay despite different SSE chunk boundaries.
 
-**When to use:**
-- Validating that an SDK-specific assumption (event names, tool arg shapes, error envelopes) actually holds. The fix that moved subagent arg parsing into `copilotToolDisplay.ts::getSubagentMetadata` was driven by adding a real-SDK assertion that `agent_type` is what the SDK actually emits.
-- Catching regressions in SDK adapter code (`copilot/copilotAgentSession.ts`, `copilot/mapSessionEvents.ts`, `copilot/copilotToolDisplay.ts`) before they hit users.
-- **Catching SDK type-vs-schema drift.** The bundled `@github/copilot` server's runtime JSON schema can diverge from `@github/copilot-sdk`'s `.d.ts` types within a single release line — at `@github/copilot@1.0.34` the synthetic `auto` router model is returned by `listModels()` with `capabilities: {}` (no `limits`, no `supports`), even though the SDK type declares all of them required. Direct dereferences like `m.capabilities.limits.max_context_window_tokens` throw `TypeError` at runtime on the first such model. The `listModels returns well-shaped model entries after authenticate` test asserts the `auto` model is in the returned list and tolerates `maxContextWindow: undefined`. The fix at the consumer side is the `ICopilotModelInfo` wrapper interface in `copilotAgent.ts` (re-declares the same fields with optional sub-objects) plus `IAgentModelInfo.maxContextWindow?: number` — see [copilot-agent-provider gotcha](./copilot-agent-provider.md#debt--gotchas). Add similar shape-asserting tests when adding new SDK-typed dereferences in adapter code.
+**Updating:**
+```sh
+# Tokenless: update only AHP output from existing LLM replay.
+AGENT_HOST_UPDATE_AHP_SNAPSHOTS=1 ./scripts/test-integration.sh --run <provider-file> --grep "<test>"
 
-**When *not* to use:**
-- For routine logic. The auth-and-network hop makes them slow and occasionally flaky; CI does not run them by default.
-- Any test that doesn't genuinely depend on the real SDK behavior. If a `ScriptedMockAgent` event sequence captures the contract, prefer the protocol integration test instead.
+# Needs a GitHub token: update LLM + AHP in one live run.
+AGENT_HOST_UPDATE_SNAPSHOTS=1 ./scripts/test-integration.sh --run <provider-file> --grep "<test>"
 
-**Mocked-LLM variant (`copilotRealSdkMocked.integrationTest.ts`).** A newer sibling suite runs the **real** `@github/copilot` SDK/process against a local mock LLM HTTP server (`startRealServer({ mockLlm: true })` in `testHelpers.ts`) instead of a live provider endpoint. Unlike `copilotRealSdk.integrationTest.ts` / `claudeRealSdk.integrationTest.ts`, it does **not** gate its suite on `AGENT_HOST_REAL_SDK` (`enabled: true` unconditionally in `realSdkTestHelpers.ts`'s `(config.enabled ? suite : suite.skip)` pattern) — it needs no network or auth, so it matches the default `--runGlob '**/*.integrationTest.js'` and **runs in default PR CI** (`./scripts/test-integration.sh --tfs "Integration Tests"`), unlike the gated real-SDK suites. Use this variant for SDK-process-shape assertions you want enforced on every PR rather than only when someone remembers to set `AGENT_HOST_REAL_SDK=1`.
+# Update only LLM fixtures.
+AGENT_HOST_REPLAY_RECORD=1 ./scripts/test-integration.sh --run <provider-file> --grep "<test>"
+```
+The combined update deliberately skips record-only scenarios such as mid-turn abort. Scope updates with `--grep` unless every scenario in the provider file should be re-recorded; provider-default model changes can otherwise rewrite the whole fixture set.
+
+**When to use:** SDK/CLI event ordering, runtime schemas, provider tool behavior, protocol-to-provider integration, session persistence/resume, worktree isolation, and other behavior whose value comes from running through the real provider process. Prefer lower-layer protocol or unit tests when a mock can express the contract precisely.
+
+**Safety:** Real-CAPI recording creates real sessions and really executes tools. Prompts must remain trivial/read-only and filesystem work must stay inside test-owned temporary directories.
+
+`copilotAgentHostE2EMocked.integrationTest.ts` remains a smaller real-Copilot-process suite backed by the in-repo mock LLM server.
 
 ### 4. Workbench / chat / UI tests
 
@@ -106,8 +116,8 @@ Auth comes from `gh auth token` by default; override with `GITHUB_TOKEN`.
 ## Decision tree: which layer?
 
 ```
-Does it depend on the real Copilot SDK's wire behavior?
-  → real-SDK integration test (*RealSdk.integrationTest.ts + realSdkTestHelpers.ts)
+Does it depend on a bundled provider SDK/CLI's runtime behavior?
+  → bundled-provider E2E test (*AgentHostE2E.integrationTest.ts)
 Does it depend on multi-client, server-initiated, reconnect, or wire-format ordering?
   → protocol integration test (*.integrationTest.ts + ScriptedMockAgent)
 Does it render or update workbench chat UI / content parts?
@@ -140,19 +150,19 @@ Three coordination details bite if missed (each surfaced in the 2026-05-26 termi
 
 - [agent-host-protocol](./agent-host-protocol.md) — the contract that protocol integration tests exercise.
 - [agent-host-session-handler](./agent-host-session-handler.md) — the workbench adapter that workbench/UI tests cover.
-- [copilot-agent-provider](./copilot-agent-provider.md) — the SDK adapter that real-SDK integration tests guard.
+- [copilot-agent-provider](./copilot-agent-provider.md) — the SDK adapter that bundled-provider E2E tests guard.
 
 ## Debt & gotchas
 
 - **debt** (2026-04-26, agentHostDiffs.ts) — `src/vs/sessions/contrib/providers/agentHost/browser/agentHostDiffs.ts` has **no unit tests**. It contains `diffsToChanges` (which must correctly handle `added`, `modified`, `deleted`, and `renamed` statuses) and `diffsEqual`. Two bugs were shipped and caught manually in the running product: (1) added-file bug — `originalUri` was set to a `git-blob:` URI with an invalid path for the "before" side of a new file; (2) deleted-file bug — `modifiedUri` was set to the pre-deletion real path, causing the diff editor to throw "Unable to resolve nonexistent file". A `agentHostDiffs.test.ts` covering all four statuses with both `mapUri` present and absent would have caught both. See [agent-host-git-driven-diffs](./agent-host-git-driven-diffs.md#debt--gotchas).
 - **gotcha** (2026-04-22, agentHostChatContribution.test.ts:MockAgentHostService) — TypeScript class fields are initialized **top-to-bottom**. If a field initializer references another field (e.g. `rootState = { ... onDidChange: this._rootStateOnDidChange.event ... }`), the referenced field **must be declared first** or you'll hit `Cannot read properties of undefined (reading 'event')` at runtime. In `MockAgentHostService` this means `_rootStateOnDidChange: Emitter<...>` must be declared before `rootState`. The TypeScript compiler does not warn about this.
-- **gotcha** (2026-04-21, protocol/*RealSdk.integrationTest.ts + realSdkTestHelpers.ts) — gated on `AGENT_HOST_REAL_SDK=1` and not run by CI, so any string identifier embedded in these files (provider ids, agent names, well-known config keys) can sit broken indefinitely after a rename — TypeScript doesn't catch it (the API parameters are typed as plain `string`) and the suites never run unattended. When renaming anything in the agent host that has a corresponding string in these files, manually run the affected suite (remember to `unset ELECTRON_RUN_AS_NODE` first; see § 3 for the full invocation) and grep the real-SDK files for the old name.
-- **gotcha** (2026-04-22, protocol/realSdkTestHelpers.ts:`planning-mode session-state writes are auto-approved in default mode`) — providers that do not surface plan mode run this as `test.skip`. The public `@github/copilot-sdk` has no way to enter plan mode (`MessageOptions` has no `agentMode` field) and no `Session.respondToExitPlanMode()` method, so even when the SDK emits `exit_plan_mode.requested` (the event type IS in the public union), there's no responder API. The extension uses the **private** `@github/copilot/sdk` which has both surfaces — see [copilot-agent-provider gotcha](./copilot-agent-provider.md#debt--gotchas) on the public/private SDK split. Re-enable a provider's path once that provider surfaces plan-mode entry/exit. Don't be fooled by the `onExitPlanMode` callback in `SessionOptions` either: in the public SDK it's `protected` and not exposed via `ResumeSessionConfig` — that's a private-only callback path.
-- **gotcha** (2026-04-22, protocol/realSdkTestHelpers.ts:startBackgroundApprovalLoop) — `client.waitForNotification(predicate, timeout)` does NOT consume notifications from its queue when the predicate matches; it only filters them. Any background loop that polls for an event class (e.g. `session/toolCallReady`) and acts on it must dedupe by `getActionEnvelope(n).serverSeq` and skip already-handled seqs in *both* the predicate and the action guard, or it busy-spins on the same notification forever and the loop never times out. Deduping by domain id (e.g. `toolCallId`) is wrong: the same id can legitimately appear in multiple notifications (e.g. re-confirmation while the tool runs).
+- **gotcha** (2026-04-22, protocol/agentHostE2ETestHelpers.ts:startBackgroundApprovalLoop) — `client.waitForNotification(predicate, timeout)` does NOT consume notifications from its queue when the predicate matches; it only filters them. Any background loop that polls for an event class (e.g. `chat/toolCallReady`) and acts on it must dedupe by `getActionEnvelope(n).serverSeq` and skip already-handled seqs in *both* the predicate and the action guard, or it busy-spins on the same notification forever. Snapshot rounds avoid the analogous stale-match bug by capturing the notification backlog at round start.
 - **gotcha** (2026-05-28, build/linux/debian/dep-lists.ts vs CI surfaces) — the deb auto-deps allowlist check (`vscode-linux-x64-prepare-deb` in `gulpfile.vscode.linux.ts`, error string "The dependencies list has changed.") only runs in the **Azure DevOps pipeline**, not in the GitHub Actions PR CI that gates merges. PR-level `gh pr checks` looks all-green even when this is about to fail, and the AzDo failure surfaces hours later. When bumping anything that ships a prebuilt native module (`@github/copilot`'s `runtime.node`, `@vscode/sqlite3`, `native-watchdog`, etc.), proactively diff GLIBC tiers — e.g. `objdump -T <module>.node | grep -oE 'GLIBC_[0-9.]+' | sort -u` against the previous version — and update `build/linux/debian/dep-lists.ts` in the same PR. The same blind spot applies to RPM (`build/linux/rpm/dep-lists.ts`), though RPM resolution rules are looser and usually already cover newer symbols. Also worth knowing: Azure DevOps build logs require organizational auth; `web_fetch` returns only the sign-in page, and `gh pr checks` shows the failing job name but not its log body — you have to either follow the link in a browser or ask whoever opened the PR to paste the failing chunk.
-- **gotcha** (2026-04-22, protocol/copilotRealSdk.integrationTest.ts) — when asserting on shell-command text the SDK emitted, anchor the regex with `^` and explicitly tolerate quoted variants (`cd "<dir>"` vs `cd <dir>`) and both chain operators (`&&` and `;`). A naked `String.includes("cd " + tempDir)` substring check misses quoted forms and is also tripped by tempDir appearing later in the same command. The cd-prefix-strip test uses `new RegExp('^cd (?:"' + esc + '"|' + esc + ')\\s*(?:&&|;)')` against the rewritten and the original command lines.
+- **gotcha** (2026-04-22, protocol/copilotAgentHostE2E.integrationTest.ts) — when asserting on shell-command text the SDK emitted, anchor the regex with `^` and explicitly tolerate quoted variants (`cd "<dir>"` vs `cd <dir>`) and both chain operators (`&&` and `;`). A naked `String.includes("cd " + tempDir)` substring check misses quoted forms and is also tripped by tempDir appearing later in the same command.
 
 ## Changelog
+
+- **2026-07-14** — 9380afea4c — replaced the obsolete gated real-SDK test description with the landed deterministic bundled-provider E2E architecture; documented strict LLM replay, executable multi-round AHP snapshots, semantic stream normalization, update modes, and removed obsolete gotchas for deleted real-SDK helper files. PR [#325892](https://github.com/microsoft/vscode/pull/325892).
 
 - **2026-07-02** — f9f2fd558a — reconciliation: the four test layers still hold; added a **Mocked-LLM variant** callout under layer 3 for the new `copilotRealSdkMocked.integrationTest.ts` (`148a3b30735`), which runs the real Copilot SDK against a local mock LLM server and — unlike the `AGENT_HOST_REAL_SDK`-gated suites — is **not** gated, so it runs in default PR CI. Added `copilotCustomizations.integrationTest.ts` to the layer-2 file list and a new `src/vs/platform/agentHost/test/electron-browser/*.test.ts` location (renderer reverse-RPC/IPC channel registration, e.g. `localAgentHostService.test.ts`) to layer 1. The prior baseline SHA (`5edb399a83`, dated 2026-06-27) post-dates `09c18fe5c5` but is not an ancestor of `origin/main` because its source history was rebased/superseded before landing; this reconciliation therefore used the baseline-date fallback.
 
