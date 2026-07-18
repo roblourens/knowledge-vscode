@@ -1,6 +1,6 @@
 # Copilot Agent Provider
 
-_Covers: src/vs/platform/agentHost/node/copilot/copilotAgent.ts, src/vs/platform/agentHost/node/copilot/copilotBranchNameGenerator.ts, src/vs/platform/agentHost/node/copilot/prompts/, src/vs/platform/agentHost/test/node/copilotAgent.test.ts, src/vs/platform/agentHost/test/node/agentHostPromptRegistry.test.ts_
+_Covers: src/vs/platform/agentHost/node/copilot/copilotAgent.ts, src/vs/platform/agentHost/node/copilot/copilotBranchNameGenerator.ts, src/vs/platform/agentHost/node/copilot/copilotSessionLauncher.ts, src/vs/platform/agentHost/node/copilot/prompts/, src/vs/platform/agentHost/test/node/copilotAgent.test.ts, src/vs/platform/agentHost/test/node/copilotSessionLauncher.test.ts, src/vs/platform/agentHost/test/node/agentHostPromptRegistry.test.ts_
 
 `CopilotAgent` is the local Agent Host provider backed by the Copilot SDK. It is provider-specific code under `src/vs/platform/agentHost/node/copilot/`, below the generic AHP server layer and above the SDK runtime. Generic aggregation (`AgentService`) and UI consumers should receive already-filtered Copilot session metadata from this provider.
 
@@ -61,7 +61,7 @@ Any existing per-session database qualifies as owned. This intentionally keeps t
 
 After a session passes the database gate, `listSessions()` may resolve project metadata and store the resolution to avoid rediscovering git context on later lists. That write is safe because the database already existed before the list operation considered the session owned.
 
-This database-existence gate is the local-agent-host half of the coexistence contract with the extension-host `CopilotChatSessionsProvider`. The extension provider has its own symmetric filter via `IChatSessionMetadataStore.getSessionOrigin()`: sessions without the extension's per-session JSON metadata return `'other'` and are excluded. Together these two filters ensure each provider shows only its own sessions with no overlap. See [agent-host-sessions-providers § Coexistence](./agent-host-sessions-providers.md#coexistence-with-the-extension-host-provider).
+This database-existence gate is the local-agent-host half of the coexistence contract with the extension-host `CopilotChatSessionsProvider`. In the other direction, `CopilotSessionLauncher` passes `clientName: 'vscode-agent-host'` on both create and resume so the extension can reject new Agent Host sessions without filesystem work. Older sessions retain generic provenance, so the extension indexes the Agent Host data directory once as a compatibility fallback. The Agent Host provider itself still treats its database as authoritative ownership; SDK `clientName` is mutable last-resumer metadata, not an Agent Host persistence contract. See [agent-host-sessions-providers § Coexistence](./agent-host-sessions-providers.md#coexistence-with-the-extension-host-provider).
 
 ## Metadata
 
@@ -239,6 +239,7 @@ Run via `npm run test-node -- --grep <pattern>`. Do not use `scripts/test.sh` fo
 
 ## Changelog
 
+- **2026-07-18** — 08a0ee38b2 — documented the extension-facing ownership marker: `CopilotSessionLauncher` sends `clientName: 'vscode-agent-host'` on create and resume, while Agent Host continues to use its per-session database as authoritative ownership. Added producer-side launcher coverage for both SDK paths. PR [#326461](https://github.com/microsoft/vscode/pull/326461).
 - **2026-07-13** — 15f7089591 — worktree creation now rejects both branch and target-path collisions, retries through a bounded candidate sequence, treats failed branch probes conservatively, and serializes candidate selection plus creation per repository to avoid concurrent-session races. Fixes [#325527](https://github.com/microsoft/vscode/issues/325527), PR [#325528](https://github.com/microsoft/vscode/pull/325528).
 - **2026-07-10** — 4c9acc2444 — added **Resume working-directory repair** section (`_ensureResumeWorkingDirectory`: archived → repo-root history-only; live → recreate worktree; else throw exported `SessionWorkingDirectoryMissingError` with a `reason`). Recreation centralized in shared `_recreateWorktree` (returns `{ok,reason}`), used by both unarchive and resume-repair. `addExistingWorktree` now uses `git worktree add -f`. Documented the orchestrator-owned `isArchived`/`isDone` metadata keys (`AH_META_IS_ARCHIVED_DB_KEY`/`AH_META_IS_DONE_DB_KEY`) and `_isSessionArchived`. Noted the agent-agnostic read-only turn enforcement (`isChatReadOnly`/`effectiveChatInteractivity` in `agentSideEffects`) and the Claude/Codex parity debt. Fixes the empty-chat-widget-on-archived-worktree bug ([#319244](https://github.com/microsoft/vscode/issues/319244)), PR [#324341](https://github.com/microsoft/vscode/pull/324341).
 

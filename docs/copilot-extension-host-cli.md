@@ -1,6 +1,6 @@
 # Copilot Extension-Host CLI Reference
 
-_Covers: extensions/copilot/src/extension/chatSessions/copilotcli/, extensions/copilot/src/extension/chatSessions/vscode-node/chatSessions.ts, src/vs/platform/agentHost/node/copilot/_
+_Covers: extensions/copilot/src/extension/chatSessions/copilotcli/, extensions/copilot/src/extension/chatSessions/vscode-node/chatSessions.ts, src/vs/platform/agentHost/node/copilot/, src/vs/workbench/contrib/chat/browser/agentSessions/agentSessionsModel.ts_
 
 When this codebase or contributor discussion refers to **"the Copilot extension"**, **"the Copilot CLI extension"**, **"extension-host CLI"**, or **"extension-host Copilot CLI"**, the current source is `extensions/copilot/` inside the VS Code repository. The pieces that mirror Agent Host behavior live primarily under `extensions/copilot/src/extension/chatSessions/copilotcli/`; registration happens in `extensions/copilot/src/extension/chatSessions/vscode-node/chatSessions.ts` through `registerCopilotCLIServices(...)` / `registerCopilotCLIServicesV1(...)` and `vscode.chat.registerChatSessionContentProvider(...)`.
 
@@ -16,6 +16,19 @@ Key files often consulted alongside Agent Host work:
 - `extensions/copilot/src/extension/chatSessions/copilotcli/node/exitPlanModeHandler.ts` — plan-mode exit flow in the extension-host CLI path.
 - `extensions/copilot/src/extension/chatSessions/copilotcli/node/logger.ts` and `copilotCliBridgeSpanProcessor.ts` — request logging and OTel bridge references.
 - `extensions/copilot/src/extension/chatSessions/copilotcli/node/copilotCLISkills.ts` — skill conversion and SDK-facing customization behavior in the extension-host path.
+
+## Shared SDK session catalog: ownership and refresh
+
+The extension-host CLI and Agent Host Copilot provider share the SDK catalog under `~/.copilot/session-state`. Ownership filtering must therefore prevent each surface from listing the other's sessions without making every catalog scan proportional to the total session count.
+
+Agent Host passes `clientName: 'vscode-agent-host'` to both SDK `createSession` and `resumeSession` from `CopilotSessionLauncher`. `CopilotCLISessionService` rejects that marker before adapting either a full-list result or a targeted session item. Because older Agent Host sessions have an absent or generic client name, the extension derives `<userDataPath>/agentSessionData` from its `globalStorageUri`, reads that directory once, and compares sanitized session IDs against the resulting set. Do not replace this bulk index with per-session `IFileSystemService.stat` calls: the production VS Code filesystem service crosses extension-host/workbench IPC even for `file:` URIs, so thousands of SDK sessions become thousands of RPCs and missing-file error responses.
+
+The shared JSONL watcher is startup-gated when Agent Host owns the current surface. It is not created when `chat.agentHost.enabled` is true and either:
+
+- the agent window has `chat.agentHost.defaultSessionsProvider` enabled; or
+- an editor window has `chat.defaultToCopilotHarness` enabled.
+
+This is intentionally surface-specific. When the extension-host CLI remains the default, the watcher still observes standalone CLI sessions, other VS Code windows, and other processes writing the shared catalog. Extension-owned in-memory sessions continue to publish direct create/change/delete events independently of the filesystem watcher.
 
 ## Parity gaps relevant to Agent Host
 
@@ -38,6 +51,8 @@ One small **shared-SDK-shape** note cutting the other way: `d892b5773de` moved A
 
 ## Debt & gotchas
 
+- **debt** (2026-07-18, copilotcliSessionService.ts:monitorSessionFiles + sessionsView.ts/chatViewPane.ts focus handlers) — when the shared JSONL watcher is active, ordinary modifications still send both a targeted item update and a global list invalidation; focus handlers can independently force all-provider refreshes. The 500 ms throttler and single-flight list promise coalesce bursts but provide no visibility gate or freshness TTL. Prefer incremental create/change/delete updates and refresh only visible stale lists.
+- **debt** (2026-07-18, agentSessionsModel.ts:observeSession/doResolveProvider + chatSessionRepositoryTracker.ts:createRepositoryWatcher) — provider refresh clears the resolve-once guard and re-resolves every observed row. Extension-host session metadata that points at a deleted worktree can therefore retry Git `openRepository` indefinitely. Add negative caching or prune/repair unavailable session workspaces so a stale row cannot re-arm failed Git probes every few seconds.
 - **debt** (2026-04-21, updated 2026-04-29, copilotAgent.ts:_resolveSessionWorkingDirectory) — worktree isolation now covers create + archive cleanup + unarchive recreate (see [copilot-agent-provider § Archive lifecycle](./copilot-agent-provider.md#archive-lifecycle-worktree-cleanup)), but still lacks the extension-host CLI's turn-end auto-commit/checkpoint lifecycle. Until that lands, the archive cleanup path skips on uncommitted changes to avoid silently destroying user work. Add provider/protocol-side checkpoint or commit metadata before relying on Agent Host worktree sessions as shippable branches.
 - **debt** (2026-04-21, copilotPluginConverters.ts:toSdkMcpServers) — plugin MCP conversion exists, but the Agent Host path does not yet mirror extension-host MCP gateway forwarding, built-in GitHub MCP fallback, or custom-agent tool-name remapping. Add an AHP-native bridge rather than copying extension HTTP/lock-file transport directly.
 - **debt** (2026-04-21, copilotAgentSession.ts:_subscribeForLogging) — provider logging is broad but lacks the extension-host request/conversation logger and SDK OTel span bridge. Selfhosting needs correlated turn, tool, hook, and span diagnostics.
@@ -52,6 +67,7 @@ One small **shared-SDK-shape** note cutting the other way: `d892b5773de` moved A
 
 ## Changelog
 
+- **2026-07-18** — 08a0ee38b2 — documented shared SDK-catalog ownership and refresh behavior: Agent Host's `vscode-agent-host` client marker, one-read legacy database-directory index, surface-specific JSONL watcher suppression, and remaining global-refresh/stale-worktree retry debt. PR [#326461](https://github.com/microsoft/vscode/pull/326461).
 - **2026-07-02** — f9f2fd558a — reconciliation: extension-host-parity framing still holds; `@github/copilot` is now `^1.0.67` (both root `package.json` and `extensions/copilot/package.json` — see [copilot-agent-provider](./copilot-agent-provider.md) for the version-tracking gotcha). Noted the MCP auth-persistence vs. gateway-forwarding distinction, and added a new paragraph enumerating several Agent Host capabilities (chat-addressed multi-chat/quick-chats/drafts, unsaved-editor/session-reference attachments, provider-agnostic feedback-tool display) that have **no EH CLI equivalent at all** rather than an open parity gap, since the driving commits never touched the EH CLI's own files. Also noted a shared-SDK-shape TODO: EH CLI's `copilotCLITools.ts::formatSearchToolInvocationCompleted` still depends on the legacy `terminal` SDK content type that Agent Host moved off of for shell exit-code decorations (`d892b5773de`). Commits: `9d557c6230f`, `e63efae792a`, `17c6cd4836d`, `b10844efce8`, `ed577eeefb6`, `10341f245aa`, `8f1b02ba777`, `3ed83a9bc1d`, `07a63f4c0ee`, `d892b5773de`, `2bdc0be5a20`, `bce3ff255b9`.
 
 - **2026-06-25** — 09c18fe5c5 — reconciliation: extension-host-parity framing still holds. `@github/copilot` is now pinned at `^1.0.65` (both root `package.json` and `extensions/copilot/package.json`). Automatic-instructions computation lives in the extension at `extensions/copilot/src/platform/promptFiles/node/automaticInstructionsCollector.ts` (the `ComputeAutomaticInstructions` logic now resides in the extension), a reference point for the agent-host side's still-thinner request-context parity.
