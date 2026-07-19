@@ -80,6 +80,12 @@ Add `--grep "<test name>"` to focus a scenario. Replay is the default and strict
 
 `AhpSnapshotRecorder` normalizes resource and turn ids, excludes high-frequency environment-dependent notifications, and coalesces `chat/responsePart` plus `chat/delta` into final content. This semantic normalization is what lets the same AHP snapshot describe both live recording and deterministic replay despite different SSE chunk boundaries.
 
+Replay fixtures can contain `${workdir}`, `${temp}`, `${homedir}`, `${user}`, and `${capi}` placeholders. Every session gives the proxy its active workspace before provider traffic begins. Replay expands placeholders in the structured model reply before SSE serialization, so native Windows paths are JSON-escaped correctly; recording normalizes native, canonical macOS, JSON-escaped, and file-URI path forms. A shared replay server swaps both the per-test fixture and workspace between tests while retaining the provider SDK/CLI process.
+
+**Snapshot profiles:**
+- The default `protocol` profile is detailed. Use it when permission transitions, tool-ready state, display metadata, raw tool output, or exact AHP lifecycle is the behavior under test.
+- The `behavior` profile is for filesystem and shell scenarios whose primary oracle is the real tool execution plus direct TypeScript assertions. It retains user turns, tool identity, completion success/failure, detailed errors, assistant responses, and turn completion. It omits provider-generated display strings, raw tool output, repeated ready/delta/confirmation traffic, usage, and incidental session updates. Tools still execute normally; create/edit/delete/rename tests assert the resulting filesystem state directly.
+
 **Updating:**
 ```sh
 # Tokenless: update only AHP output from existing LLM replay.
@@ -92,6 +98,16 @@ AGENT_HOST_UPDATE_SNAPSHOTS=1 ./scripts/test-integration.sh --run <provider-file
 AGENT_HOST_REPLAY_RECORD=1 ./scripts/test-integration.sh --run <provider-file> --grep "<test>"
 ```
 The combined update deliberately skips record-only scenarios such as mid-turn abort. Scope updates with `--grep` unless every scenario in the provider file should be re-recorded; provider-default model changes can otherwise rewrite the whole fixture set.
+
+**Coverage:**
+```sh
+npm run test-agent-host-e2e-coverage
+```
+The coverage runner retranspiles, then invokes the resource suite, the remaining deterministic protocol suites, and the bundled-provider suites in separate Electron processes. `AGENT_HOST_E2E_COVERAGE=1` sets `NODE_V8_COVERAGE` only on Agent Host children. The harness closes server stdin and awaits graceful process exit so V8 flushes after session persistence and provider shutdown.
+
+All groups append raw coverage to `.build/agent-host-e2e-coverage/raw/`. `c8 report` emits text, HTML, LCOV, and JSON under `.build/agent-host-e2e-coverage/report/`; `coverage/agentHostE2E.json` is the checked-in normalized baseline. The denominator contains only loaded executable TypeScript files under `src/vs/platform/agentHost/{common,node}` after source-map remapping. Unloaded files, tests, provider dependencies, and generated type-only modules are excluded. The baseline is informational: no threshold or regression gate is active.
+
+**Expected provider/platform gates:** tests stay registered as `test.skip` for known unsupported variants rather than accepting incorrect output. Codex currently duplicates response parts in the new behavior scenarios; several Copilot read/edit/delete turns do not complete; record-only, plan-mode, subagent, worktree, and POSIX-shell cases retain their existing capability/OS gates. The behavior profile removes presentation-only cross-platform failures, but it does not make an unavailable command executable.
 
 **When to use:** SDK/CLI event ordering, runtime schemas, provider tool behavior, protocol-to-provider integration, session persistence/resume, worktree isolation, and other behavior whose value comes from running through the real provider process. Prefer lower-layer protocol or unit tests when a mock can express the contract precisely.
 
@@ -154,6 +170,9 @@ Three coordination details bite if missed (each surfaced in the 2026-05-26 termi
 
 ## Debt & gotchas
 
+- **gotcha** (2026-07-19, scripts/agent-host-e2e-coverage.ts) — aggregate coverage must run resource, protocol, and bundled-provider groups in separate Electron invocations while appending to the same raw V8 directory. Loading them together exited at the first provider suite. Coverage mode also needs longer opt-in startup hooks; do not weaken normal test timeouts.
+- **gotcha** (2026-07-19, protocol/coverage/agentHostE2E.json) — native V8 aggregate coverage varies slightly between otherwise deterministic runs because asynchronous startup/provider paths cover different executable ranges. A future gate must use an intentional tolerance or ratchet policy, never byte-for-byte baseline equality.
+- **gotcha** (2026-07-19, protocol/ahpSnapshot.ts:IAhpSnapshotOptions) — the `behavior` and `protocol` profiles have different contracts. Behavior snapshots intentionally drop raw tool presentation while direct assertions verify side effects; permission and lifecycle tests need the default protocol profile. Collapsing these profiles would either reintroduce cross-platform churn or weaken protocol tests.
 - **debt** (2026-04-26, agentHostDiffs.ts) — `src/vs/sessions/contrib/providers/agentHost/browser/agentHostDiffs.ts` has **no unit tests**. It contains `diffsToChanges` (which must correctly handle `added`, `modified`, `deleted`, and `renamed` statuses) and `diffsEqual`. Two bugs were shipped and caught manually in the running product: (1) added-file bug — `originalUri` was set to a `git-blob:` URI with an invalid path for the "before" side of a new file; (2) deleted-file bug — `modifiedUri` was set to the pre-deletion real path, causing the diff editor to throw "Unable to resolve nonexistent file". A `agentHostDiffs.test.ts` covering all four statuses with both `mapUri` present and absent would have caught both. See [agent-host-git-driven-diffs](./agent-host-git-driven-diffs.md#debt--gotchas).
 - **gotcha** (2026-04-22, agentHostChatContribution.test.ts:MockAgentHostService) — TypeScript class fields are initialized **top-to-bottom**. If a field initializer references another field (e.g. `rootState = { ... onDidChange: this._rootStateOnDidChange.event ... }`), the referenced field **must be declared first** or you'll hit `Cannot read properties of undefined (reading 'event')` at runtime. In `MockAgentHostService` this means `_rootStateOnDidChange: Emitter<...>` must be declared before `rootState`. The TypeScript compiler does not warn about this.
 - **gotcha** (2026-04-22, protocol/agentHostE2ETestHelpers.ts:startBackgroundApprovalLoop) — `client.waitForNotification(predicate, timeout)` does NOT consume notifications from its queue when the predicate matches; it only filters them. Any background loop that polls for an event class (e.g. `chat/toolCallReady`) and acts on it must dedupe by `getActionEnvelope(n).serverSeq` and skip already-handled seqs in *both* the predicate and the action guard, or it busy-spins on the same notification forever. Snapshot rounds avoid the analogous stale-match bug by capturing the notification backlog at round start.
@@ -161,6 +180,8 @@ Three coordination details bite if missed (each surfaced in the 2026-05-26 termi
 - **gotcha** (2026-04-22, protocol/copilotAgentHostE2E.integrationTest.ts) — when asserting on shell-command text the SDK emitted, anchor the regex with `^` and explicitly tolerate quoted variants (`cd "<dir>"` vs `cd <dir>`) and both chain operators (`&&` and `;`). A naked `String.includes("cd " + tempDir)` substring check misses quoted forms and is also tripped by tempDir appearing later in the same command.
 
 ## Changelog
+
+- **2026-07-19** — 75098683e8 — added native loaded-file Agent Host coverage, broader resource/protocol/provider scenarios, replay workspace expansion, cross-platform behavior snapshots, and the current provider/platform gating rules. PR [#326493](https://github.com/microsoft/vscode/pull/326493).
 
 - **2026-07-14** — 9380afea4c — replaced the obsolete gated real-SDK test description with the landed deterministic bundled-provider E2E architecture; documented strict LLM replay, executable multi-round AHP snapshots, semantic stream normalization, update modes, and removed obsolete gotchas for deleted real-SDK helper files. PR [#325892](https://github.com/microsoft/vscode/pull/325892).
 
