@@ -2,7 +2,7 @@
 
 _Covers: src/vs/platform/agentHost/test/, src/vs/workbench/contrib/chat/test/browser/agentSessions/, src/vs/workbench/contrib/chat/test/browser/agentHost/, src/vs/sessions/test/_
 
-The agent host has four distinct test layers, each with its own runner, scope, and trade-offs. Pick the lowest layer that can express the regression you care about — higher layers are slower, flakier, and less precise about *what* broke.
+The agent host has four primary test layers plus two focused provider-integration variants. Pick the lowest layer that can express the regression you care about — higher layers are slower, flakier, and less precise about *what* broke.
 
 ## The four layers
 
@@ -39,7 +39,7 @@ Pattern matches mocha suite/test names. Examples: `--grep "AgentSideEffects|Agen
 
 **What they exercise:** A real Agent Host server process started by `startServer()`, talking to one or more in-test clients via WebSocket. Agents are mocked via `ScriptedMockAgent` (the `--enable-mock-agent` flow), so the *protocol* is exercised end-to-end but no SDK is involved.
 
-**Where they live:** `src/vs/platform/agentHost/test/node/protocol/*.integrationTest.ts`. Existing files include `handshake`, `sessionLifecycle`, `sessionFeatures`, `sessionConfig`, `turnExecution`, `toolApproval`, `clientTools`, `multiClient`, `agentHostServer`, `copilotCustomizations`.
+**Where they live:** `src/vs/platform/agentHost/test/node/protocol/*.integrationTest.ts`. Existing files include `handshake`, `sessionLifecycle`, `sessionFeatures`, `sessionConfig`, `turnExecution`, `toolApproval`, `clientTools`, `multiClient`, and `agentHostServer`.
 
 **How to run:**
 ```sh
@@ -64,13 +64,18 @@ node build/next/index.ts transpile   # required after editing TS
 
 **What they exercise:** The complete Agent Host stack: a real server subprocess, the bundled Copilot / Claude / Codex SDK or CLI subprocess, real AHP over WebSocket, and real local tool execution. Only the language-model boundary is faked during normal runs. `CapiReplayProxy` serves committed normalized model replies, so the suites are deterministic, tokenless, network-free, and run in PR CI.
 
-**Where they live:** Provider entrypoints are `copilotAgentHostE2E.integrationTest.ts`, `claudeAgentHostE2E.integrationTest.ts`, and `codexAgentHostE2E.integrationTest.ts`; shared behavior and lifecycle live in `agentHostE2ETestHelpers.ts`. `capiReplayProxy.ts` / `capiWireCodec.ts` own LLM fixtures under `captures/agentHostE2E/`. `ahpSnapshot.ts` owns executable semantic AHP snapshots under `__snapshots__/`.
+**Where they live:** `src/vs/platform/agentHost/test/node/e2e/` is the dedicated full-stack E2E area:
+- `providers/` contains the Claude, Codex, and Copilot entrypoints plus provider-specific scenarios. Live, non-deterministic Codex coverage is isolated in `codexAgentHostLive.integrationTest.ts`.
+- `suites/` contains cross-provider scenarios grouped by behavior (`core`, file operations, turn lifecycle, workspace/isolation, subagents).
+- `harness/` owns record/replay, AHP snapshots, shared drivers, and the provider server lease.
+- `captures/*.yaml` contains one normalized LLM fixture per `(provider, test)`.
+- `providers/__snapshots__/` contains semantic AHP snapshots.
 
 **How to run:**
 ```sh
 unset ELECTRON_RUN_AS_NODE
 ./scripts/test-integration.sh --run \
-  src/vs/platform/agentHost/test/node/protocol/copilotAgentHostE2E.integrationTest.ts
+  src/vs/platform/agentHost/test/node/e2e/providers/copilotAgentHostE2E.integrationTest.ts
 ```
 Add `--grep "<test name>"` to focus a scenario. Replay is the default and strict: an unrecorded model request is a hard cache miss, never a fallback to real CAPI.
 
@@ -103,9 +108,9 @@ The combined update deliberately skips record-only scenarios such as mid-turn ab
 ```sh
 npm run test-agent-host-e2e-coverage
 ```
-The coverage runner retranspiles, then invokes the resource suite, the remaining deterministic protocol suites, and the bundled-provider suites in separate Electron processes. `AGENT_HOST_E2E_COVERAGE=1` sets `NODE_V8_COVERAGE` only on Agent Host children. The harness closes server stdin and awaits graceful process exit so V8 flushes after session persistence and provider shutdown.
+The coverage runner retranspiles and runs only the deterministic Claude, Codex, and Copilot full-stack suites. Mock-agent protocol tests, synthetic-LLM provider integration tests, and direct-SDK integration tests do not contribute. `AGENT_HOST_E2E_COVERAGE=1` sets `NODE_V8_COVERAGE` only on Agent Host children. The harness closes server stdin and awaits graceful process exit so V8 flushes after session persistence and provider shutdown.
 
-All groups append raw coverage to `.build/agent-host-e2e-coverage/raw/`. `c8 report` emits text, HTML, LCOV, and JSON under `.build/agent-host-e2e-coverage/report/`; `coverage/agentHostE2E.json` is the checked-in normalized baseline. The denominator contains only loaded executable TypeScript files under `src/vs/platform/agentHost/{common,node}` after source-map remapping. Unloaded files, tests, provider dependencies, and generated type-only modules are excluded. The baseline is informational: no threshold or regression gate is active.
+Raw coverage is written to `.build/agent-host-e2e-coverage/raw/`. `c8 report` emits text, HTML, LCOV, and JSON under `.build/agent-host-e2e-coverage/report/`; `e2e/coverage/summary.json` is the checked-in normalized baseline. The denominator contains only loaded executable TypeScript files under `src/vs/platform/agentHost/{common,node}` after source-map remapping. Unloaded files, tests, provider dependencies, and generated type-only modules are excluded. The baseline is informational: no threshold or regression gate is active.
 
 **Expected provider/platform gates:** tests stay registered as `test.skip` for known unsupported variants rather than accepting incorrect output. Codex currently duplicates response parts in the new behavior scenarios; several Copilot read/edit/delete turns do not complete; record-only, plan-mode, subagent, worktree, and POSIX-shell cases retain their existing capability/OS gates. The behavior profile removes presentation-only cross-platform failures, but it does not make an unavailable command executable.
 
@@ -113,7 +118,11 @@ All groups append raw coverage to `.build/agent-host-e2e-coverage/raw/`. `c8 rep
 
 **Safety:** Real-CAPI recording creates real sessions and really executes tools. Prompts must remain trivial/read-only and filesystem work must stay inside test-owned temporary directories.
 
-`copilotAgentHostE2EMocked.integrationTest.ts` remains a smaller real-Copilot-process suite backed by the in-repo mock LLM server.
+### Provider integration variants
+
+`src/vs/platform/agentHost/test/node/providerIntegration/` starts a real Agent Host server and bundled Copilot process but replaces the model service with the local synthetic LLM server. Use it when provider lifecycle or filesystem behavior matters but realistic model behavior does not. It currently covers the basic SDK round trip, idle release/resume, and customization discovery/watching. These tests are not bundled-provider E2E tests and do not contribute to the E2E coverage report.
+
+Focused component integrations that bypass AHP live directly under `src/vs/platform/agentHost/test/node/`. For example, `copilotSdkImportSession.integrationTest.ts` constructs the Copilot SDK client directly to validate seeded session-history import. Do not classify direct-SDK tests as protocol or Agent Host E2E coverage.
 
 ### 4. Workbench / chat / UI tests
 
@@ -133,7 +142,9 @@ All groups append raw coverage to `.build/agent-host-e2e-coverage/raw/`. `c8 rep
 
 ```
 Does it depend on a bundled provider SDK/CLI's runtime behavior?
-  → bundled-provider E2E test (*AgentHostE2E.integrationTest.ts)
+  → bundled-provider E2E test (e2e/providers/*AgentHostE2E.integrationTest.ts)
+Does it need the real provider process but only synthetic, controlled model behavior?
+  → provider integration test (providerIntegration/*.integrationTest.ts)
 Does it depend on multi-client, server-initiated, reconnect, or wire-format ordering?
   → protocol integration test (*.integrationTest.ts + ScriptedMockAgent)
 Does it render or update workbench chat UI / content parts?
@@ -170,16 +181,17 @@ Three coordination details bite if missed (each surfaced in the 2026-05-26 termi
 
 ## Debt & gotchas
 
-- **gotcha** (2026-07-19, scripts/agent-host-e2e-coverage.ts) — aggregate coverage must run resource, protocol, and bundled-provider groups in separate Electron invocations while appending to the same raw V8 directory. Loading them together exited at the first provider suite. Coverage mode also needs longer opt-in startup hooks; do not weaken normal test timeouts.
-- **gotcha** (2026-07-19, protocol/coverage/agentHostE2E.json) — native V8 aggregate coverage varies slightly between otherwise deterministic runs because asynchronous startup/provider paths cover different executable ranges. A future gate must use an intentional tolerance or ratchet policy, never byte-for-byte baseline equality.
-- **gotcha** (2026-07-19, protocol/ahpSnapshot.ts:IAhpSnapshotOptions) — the `behavior` and `protocol` profiles have different contracts. Behavior snapshots intentionally drop raw tool presentation while direct assertions verify side effects; permission and lifecycle tests need the default protocol profile. Collapsing these profiles would either reintroduce cross-platform churn or weaken protocol tests.
+- **gotcha** (2026-07-19, e2e/coverage/summary.json) — native V8 aggregate coverage varies slightly between otherwise deterministic full-stack provider runs because asynchronous startup/provider paths cover different executable ranges. A future gate must use an intentional tolerance or ratchet policy, never byte-for-byte baseline equality.
+- **gotcha** (2026-07-19, e2e/harness/ahpSnapshot.ts:IAhpSnapshotOptions) — the `behavior` and `protocol` profiles have different contracts. Behavior snapshots intentionally drop raw tool presentation while direct assertions verify side effects; permission and lifecycle tests need the default protocol profile. Collapsing these profiles would either reintroduce cross-platform churn or weaken protocol tests.
 - **debt** (2026-04-26, agentHostDiffs.ts) — `src/vs/sessions/contrib/providers/agentHost/browser/agentHostDiffs.ts` has **no unit tests**. It contains `diffsToChanges` (which must correctly handle `added`, `modified`, `deleted`, and `renamed` statuses) and `diffsEqual`. Two bugs were shipped and caught manually in the running product: (1) added-file bug — `originalUri` was set to a `git-blob:` URI with an invalid path for the "before" side of a new file; (2) deleted-file bug — `modifiedUri` was set to the pre-deletion real path, causing the diff editor to throw "Unable to resolve nonexistent file". A `agentHostDiffs.test.ts` covering all four statuses with both `mapUri` present and absent would have caught both. See [agent-host-git-driven-diffs](./agent-host-git-driven-diffs.md#debt--gotchas).
 - **gotcha** (2026-04-22, agentHostChatContribution.test.ts:MockAgentHostService) — TypeScript class fields are initialized **top-to-bottom**. If a field initializer references another field (e.g. `rootState = { ... onDidChange: this._rootStateOnDidChange.event ... }`), the referenced field **must be declared first** or you'll hit `Cannot read properties of undefined (reading 'event')` at runtime. In `MockAgentHostService` this means `_rootStateOnDidChange: Emitter<...>` must be declared before `rootState`. The TypeScript compiler does not warn about this.
-- **gotcha** (2026-04-22, protocol/agentHostE2ETestHelpers.ts:startBackgroundApprovalLoop) — `client.waitForNotification(predicate, timeout)` does NOT consume notifications from its queue when the predicate matches; it only filters them. Any background loop that polls for an event class (e.g. `chat/toolCallReady`) and acts on it must dedupe by `getActionEnvelope(n).serverSeq` and skip already-handled seqs in *both* the predicate and the action guard, or it busy-spins on the same notification forever. Snapshot rounds avoid the analogous stale-match bug by capturing the notification backlog at round start.
+- **gotcha** (2026-04-22, e2e/harness/agentHostE2ETestHarness.ts:startBackgroundApprovalLoop) — `client.waitForNotification(predicate, timeout)` does NOT consume notifications from its queue when the predicate matches; it only filters them. Any background loop that polls for an event class (e.g. `chat/toolCallReady`) and acts on it must dedupe by `getActionEnvelope(n).serverSeq` and skip already-handled seqs in *both* the predicate and the action guard, or it busy-spins on the same notification forever. Snapshot rounds avoid the analogous stale-match bug by capturing the notification backlog at round start.
 - **gotcha** (2026-05-28, build/linux/debian/dep-lists.ts vs CI surfaces) — the deb auto-deps allowlist check (`vscode-linux-x64-prepare-deb` in `gulpfile.vscode.linux.ts`, error string "The dependencies list has changed.") only runs in the **Azure DevOps pipeline**, not in the GitHub Actions PR CI that gates merges. PR-level `gh pr checks` looks all-green even when this is about to fail, and the AzDo failure surfaces hours later. When bumping anything that ships a prebuilt native module (`@github/copilot`'s `runtime.node`, `@vscode/sqlite3`, `native-watchdog`, etc.), proactively diff GLIBC tiers — e.g. `objdump -T <module>.node | grep -oE 'GLIBC_[0-9.]+' | sort -u` against the previous version — and update `build/linux/debian/dep-lists.ts` in the same PR. The same blind spot applies to RPM (`build/linux/rpm/dep-lists.ts`), though RPM resolution rules are looser and usually already cover newer symbols. Also worth knowing: Azure DevOps build logs require organizational auth; `web_fetch` returns only the sign-in page, and `gh pr checks` shows the failing job name but not its log body — you have to either follow the link in a browser or ask whoever opened the PR to paste the failing chunk.
-- **gotcha** (2026-04-22, protocol/copilotAgentHostE2E.integrationTest.ts) — when asserting on shell-command text the SDK emitted, anchor the regex with `^` and explicitly tolerate quoted variants (`cd "<dir>"` vs `cd <dir>`) and both chain operators (`&&` and `;`). A naked `String.includes("cd " + tempDir)` substring check misses quoted forms and is also tripped by tempDir appearing later in the same command.
+- **gotcha** (2026-04-22, e2e/providers/copilotAgentHostE2E.integrationTest.ts) — when asserting on shell-command text the SDK emitted, anchor the regex with `^` and explicitly tolerate quoted variants (`cd "<dir>"` vs `cd <dir>`) and both chain operators (`&&` and `;`). A naked `String.includes("cd " + tempDir)` substring check misses quoted forms and is also tripped by tempDir appearing later in the same command.
 
 ## Changelog
+
+- **2026-07-19** — 73fe3a354d — separated mock-agent protocol, synthetic-LLM provider integration, deterministic bundled-provider E2E, live provider, and direct-SDK integration tests; organized cross-provider E2E scenarios into focused suites; flattened captures; and limited E2E coverage to the full-stack provider suites. PR [#326531](https://github.com/microsoft/vscode/pull/326531).
 
 - **2026-07-19** — 75098683e8 — added native loaded-file Agent Host coverage, broader resource/protocol/provider scenarios, replay workspace expansion, cross-platform behavior snapshots, and the current provider/platform gating rules. PR [#326493](https://github.com/microsoft/vscode/pull/326493).
 
