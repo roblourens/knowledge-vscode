@@ -66,9 +66,9 @@ node build/next/index.ts transpile   # required after editing TS
 
 **Where they live:** `src/vs/platform/agentHost/test/node/e2e/` is the dedicated full-stack E2E area:
 - `providers/` contains the Claude, Codex, and Copilot entrypoints plus provider-specific scenarios. Live, non-deterministic Codex coverage is isolated in `codexAgentHostLive.integrationTest.ts`.
-- `suites/` contains cross-provider scenarios grouped by behavior (`core`, file operations, turn lifecycle, workspace/isolation, subagents).
+- `suites/` contains cross-provider scenarios grouped by behavior (`core`, host features, state operations, file operations, turn lifecycle, workspace/isolation, subagents).
 - `harness/` owns record/replay, AHP snapshots, shared drivers, and the provider server lease.
-- `captures/*.yaml` contains one normalized LLM fixture per `(provider, test)`.
+- `captures/*.yaml` contains one normalized LLM fixture per model-backed `(provider, test)`, plus `empty.yaml` for tests that explicitly declare no model traffic.
 - `providers/__snapshots__/` contains semantic AHP snapshots.
 
 **How to run:**
@@ -80,16 +80,20 @@ unset ELECTRON_RUN_AS_NODE
 Add `--grep "<test name>"` to focus a scenario. Replay is the default and strict: an unrecorded model request is a hard cache miss, never a fallback to real CAPI.
 
 **Two recorded boundaries:**
-- The per-test LLM fixture stores normalized request summaries plus regeneratable model replies. It omits volatile token counts, normalizes temp paths / UUIDs / tool-call ids, and records the wire dialect once.
+- A model-backed test's per-test LLM fixture stores normalized request summaries plus regeneratable model replies. It omits volatile token counts, normalizes temp paths / UUIDs / tool-call ids, and records the wire dialect once.
 - An AHP snapshot is an executable sequence of rounds. Each round's `clientToServer` actions are test input; `serverToClient` is expected semantic traffic, with the final server entry acting as the synchronization boundary before the next round.
 
 `AhpSnapshotRecorder` normalizes resource and turn ids, excludes high-frequency environment-dependent notifications, and coalesces `chat/responsePart` plus `chat/delta` into final content. This semantic normalization is what lets the same AHP snapshot describe both live recording and deterministic replay despite different SSE chunk boundaries.
+
+Tests registered with `hostOnlyTest(context, ...)` are full-stack provider E2E tests whose contract includes **not** crossing the model boundary. The suite harness records their titles during registration and routes them to the shared `captures/empty.yaml` in strict replay mode even when the overall run is recording. Any model request is still a hard cache miss. Missing fixtures never imply empty traffic; model-backed tests still require their title-derived captures.
 
 Replay fixtures can contain `${workdir}`, `${temp}`, `${homedir}`, `${user}`, and `${capi}` placeholders. Every session gives the proxy its active workspace before provider traffic begins. Replay expands placeholders in the structured model reply before SSE serialization, so native Windows paths are JSON-escaped correctly; recording normalizes native, canonical macOS, JSON-escaped, and file-URI path forms. A shared replay server swaps both the per-test fixture and workspace between tests while retaining the provider SDK/CLI process.
 
 **Snapshot profiles:**
 - The default `protocol` profile is detailed. Use it when permission transitions, tool-ready state, display metadata, raw tool output, or exact AHP lifecycle is the behavior under test.
 - The `behavior` profile is for filesystem and shell scenarios whose primary oracle is the real tool execution plus direct TypeScript assertions. It retains user turns, tool identity, completion success/failure, detailed errors, assistant responses, and turn completion. It omits provider-generated display strings, raw tool output, repeated ready/delta/confirmation traffic, usage, and incidental session updates. Tools still execute normally; create/edit/delete/rename tests assert the resulting filesystem state directly.
+
+Choose snapshots when presence/absence/order/routing across several AHP messages is the contract; use direct assertions when the primary oracle is an external effect or a request/result payload that the semantic projection omits; use both when both contracts matter. Do not add a snapshot that only duplicates one focused assertion.
 
 **Updating:**
 ```sh
@@ -111,6 +115,8 @@ npm run test-agent-host-e2e-coverage
 The coverage runner retranspiles and runs only the deterministic Claude, Codex, and Copilot full-stack suites. Mock-agent protocol tests, synthetic-LLM provider integration tests, and direct-SDK integration tests do not contribute. `AGENT_HOST_E2E_COVERAGE=1` sets `NODE_V8_COVERAGE` only on Agent Host children. The harness closes server stdin and awaits graceful process exit so V8 flushes after session persistence and provider shutdown.
 
 Raw coverage is written to `.build/agent-host-e2e-coverage/raw/`. `c8 report` emits text, HTML, LCOV, and JSON under `.build/agent-host-e2e-coverage/report/`; `e2e/coverage/summary.json` is the checked-in normalized baseline. The denominator contains only loaded executable TypeScript files under `src/vs/platform/agentHost/{common,node}` after source-map remapping. Unloaded files, tests, provider dependencies, and generated type-only modules are excluded. The baseline is informational: no threshold or regression gate is active.
+
+Coverage expansion rounds use a fresh run as their comparison baseline, then rank loaded files by uncovered executable count, inspect exact LCOV ranges and lower-layer tests, and select a bounded batch of meaningful full-stack contracts. Shared declaration count and provider execution count are reported separately. Coverage is a discovery tool: pure reducer behavior belongs in protocol/unit tests, while E2E candidates should require the real host/provider/AHP/persistence/tool stack. Completion requires focused cross-provider replay, the identical full coverage command, type-check, hygiene, layers, artifact review, and cross-platform CI.
 
 **Expected provider/platform gates:** tests stay registered as `test.skip` for known unsupported variants rather than accepting incorrect output. Codex currently duplicates response parts in the new behavior scenarios; several Copilot read/edit/delete turns do not complete; record-only, plan-mode, subagent, worktree, and POSIX-shell cases retain their existing capability/OS gates. The behavior profile removes presentation-only cross-platform failures, but it does not make an unavailable command executable.
 
@@ -183,6 +189,9 @@ Three coordination details bite if missed (each surfaced in the 2026-05-26 termi
 
 - **gotcha** (2026-07-19, e2e/coverage/summary.json) — native V8 aggregate coverage varies slightly between otherwise deterministic full-stack provider runs because asynchronous startup/provider paths cover different executable ranges. A future gate must use an intentional tolerance or ratchet policy, never byte-for-byte baseline equality.
 - **gotcha** (2026-07-19, e2e/harness/ahpSnapshot.ts:IAhpSnapshotOptions) — the `behavior` and `protocol` profiles have different contracts. Behavior snapshots intentionally drop raw tool presentation while direct assertions verify side effects; permission and lifecycle tests need the default protocol profile. Collapsing these profiles would either reintroduce cross-platform churn or weaken protocol tests.
+- **gotcha** (2026-07-20, e2e/suites:e2e test registration) — the Electron integration-test globals do not consistently return a chainable Mocha object from `test(...)`. Shared timeout helpers must register a `function` callback, call `this.timeout(...)` inside it, and invoke the test body with `run.call(this)` so snapshot helpers keep the runnable context; `test(...).timeout(...)` crashed the Windows test file during registration.
+- **gotcha** (2026-07-20, e2e/suites:terminal and shell scenarios) — bundled-provider E2E terminals are real platform shells. PTY data is unframed, command-detection events may be absent, shell titles can overwrite client titles, successful bang-command completion does not occur on Windows even when output arrives, and Git-backed config discovery can retain a Windows temp-repository lock after session disposal. Accumulate data, assert stable semantics, dispose ownership, and use targeted gates rather than assuming POSIX behavior.
+- **gotcha** (2026-07-20, e2e/suites:steering messages) — pending steering state is not a stable cross-provider snapshot: a provider may consume/remove it immediately, and mutation without a real active turn can destabilize provider-specific machinery. Test reducer semantics lower down; use provider E2E only for a real active-turn consumption contract.
 - **debt** (2026-04-26, agentHostDiffs.ts) — `src/vs/sessions/contrib/providers/agentHost/browser/agentHostDiffs.ts` has **no unit tests**. It contains `diffsToChanges` (which must correctly handle `added`, `modified`, `deleted`, and `renamed` statuses) and `diffsEqual`. Two bugs were shipped and caught manually in the running product: (1) added-file bug — `originalUri` was set to a `git-blob:` URI with an invalid path for the "before" side of a new file; (2) deleted-file bug — `modifiedUri` was set to the pre-deletion real path, causing the diff editor to throw "Unable to resolve nonexistent file". A `agentHostDiffs.test.ts` covering all four statuses with both `mapUri` present and absent would have caught both. See [agent-host-git-driven-diffs](./agent-host-git-driven-diffs.md#debt--gotchas).
 - **gotcha** (2026-04-22, agentHostChatContribution.test.ts:MockAgentHostService) — TypeScript class fields are initialized **top-to-bottom**. If a field initializer references another field (e.g. `rootState = { ... onDidChange: this._rootStateOnDidChange.event ... }`), the referenced field **must be declared first** or you'll hit `Cannot read properties of undefined (reading 'event')` at runtime. In `MockAgentHostService` this means `_rootStateOnDidChange: Emitter<...>` must be declared before `rootState`. The TypeScript compiler does not warn about this.
 - **gotcha** (2026-04-22, e2e/harness/agentHostE2ETestHarness.ts:startBackgroundApprovalLoop) — `client.waitForNotification(predicate, timeout)` does NOT consume notifications from its queue when the predicate matches; it only filters them. Any background loop that polls for an event class (e.g. `chat/toolCallReady`) and acts on it must dedupe by `getActionEnvelope(n).serverSeq` and skip already-handled seqs in *both* the predicate and the action guard, or it busy-spins on the same notification forever. Snapshot rounds avoid the analogous stale-match bug by capturing the notification backlog at round start.
@@ -191,6 +200,7 @@ Three coordination details bite if missed (each surfaced in the 2026-05-26 termi
 
 ## Changelog
 
+- **2026-07-20** — b1114451a0 — expanded deterministic provider E2E coverage with host features/state/terminal scenarios, explicit `hostOnlyTest` strict-empty routing, snapshot-oracle guidance, coverage-round strategy, and cross-platform lessons. PR [#326720](https://github.com/microsoft/vscode/pull/326720).
 - **2026-07-19** — 73fe3a354d — separated mock-agent protocol, synthetic-LLM provider integration, deterministic bundled-provider E2E, live provider, and direct-SDK integration tests; organized cross-provider E2E scenarios into focused suites; flattened captures; and limited E2E coverage to the full-stack provider suites. PR [#326531](https://github.com/microsoft/vscode/pull/326531).
 
 - **2026-07-19** — 75098683e8 — added native loaded-file Agent Host coverage, broader resource/protocol/provider scenarios, replay workspace expansion, cross-platform behavior snapshots, and the current provider/platform gating rules. PR [#326493](https://github.com/microsoft/vscode/pull/326493).
